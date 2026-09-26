@@ -475,6 +475,18 @@ if ! done_ render; then
   FFBIN="$("$PYS" -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())")"
   render() {  # name, out-dir, extra 05k flags...
     local name="$1" out="$2"; shift 2
+    # 05k resumes from the frames already in the out-dir, which is right after a crash and wrong after a data change:
+    # play 6's identity fixes were "rendered" in 15 s by re-encoding the old frames. Frames are reused only while no
+    # input the timeline reads is newer than the stamp written when they were started.
+    local changed=""
+    [ -f "$out/.inputs_stamp" ] && changed="$(find "$P" -maxdepth 1 \( -name tracks.parquet -o -name identity_resolved.pkl \
+       -o -name 'poses_*.json' -o -name ball.json -o -name play_end.json -o -name film_reads.json -o -name cameras.npz \) \
+       -newer "$out/.inputs_stamp" | head -1)"
+    if [ -d "$out" ] && { [ ! -f "$out/.inputs_stamp" ] || [ -n "$changed" ]; }; then
+      log "render: $name: inputs changed since its frames were drawn (${changed:-no stamp}); rendering afresh"
+      find "$out" -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name 'play.mp4' \) -delete
+    fi
+    mkdir -p "$out" && touch "$out/.inputs_stamp"
     log "render: $name (05k)"
     "$PYS" scripts/05k_render_hifi.py --play-dir "$P" --out-dir "$out" "${FIELD_FLAG[@]}" "${LOOK[@]}" "$@" 2>&1 \
        | grep -v "Warning\|warn" | grep -E "timeline:|field from|wrote|left out|Error|Traceback" || fail "render $name"
