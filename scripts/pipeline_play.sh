@@ -48,7 +48,8 @@
 # Knobs (environment variables, defaults in brackets):
 #   RED [KC]          the team in the coloured kit; 08c splits the two kits on it. One of the game's two teams.
 #   OFFENCE [$RED]    the team with the ball: its pre-snap formation gives unnamed ids their builds (08n)
-#   SNAP QB DOWN      the ball stage's hand-read inputs: the snap frame, the passer's id, the frame the carrier is down
+#   SNAP QB DOWN      the ball stage's hand-read inputs: the snap frame, the passer's id, the frame the carrier is down;
+#                     SNAP and DOWN (frames, readable before any stage runs) also bound the frames 08 samples players from
 #   FINETUNE [0]      1 = the pose fine-tune pass;  FIELD [footage]: procedural renders on a painted field
 #   ENDZONE_WEIGHT [0.3]  the endzone keypoints' weight in the two-view fit; 0 or ONE_VIEW=1: sideline only
 #   REFIT_EZ [1]      0 skips the endzone-only fits;  KICKING [0]: 1 for a kickoff, punt or field goal
@@ -85,6 +86,10 @@ P="$1"; SIDE="$2"; END="$3"; LOS="$4"; shift 4
 DIAG="${DIAG:-$REPO/outputs/diag}"; PLAY="$(basename "$P")"; mkdir -p "$DIAG"
 RED="${RED:-KC}"                                 # the team in the coloured kit (08c --saturated)
 OFFENCE="${OFFENCE:-$RED}"                       # the team with the ball: its formation gives the roles (08n)
+# With the snap and the down known, 08 samples players inside the play (2.5 s before the snap to the down): a clip
+# that runs on after the whistle with the endzone zoomed on a sideline failed the endzone solve on play 6.
+PLAY_WINDOW=""
+if [ -n "${SNAP:-}" ] && [ -n "${DOWN:-}" ]; then PLAY_WINDOW="--play-window $(( SNAP > 150 ? SNAP - 150 : 0 )) $DOWN"; fi
 SEED_FROM="${SEED_FROM:-}"                       # a solved play-dir of the same game: its sideline mount seeds 08
 GRID_PX="${GRID_PX:-}"                           # widen 08's grid judge for ONE play (px); printed with the verdict
 FRESH=0; FROM_PAINT=0
@@ -114,7 +119,7 @@ fi
 if [ "$FROM_PAINT" = 1 ] && ! done_ paint; then
   log "paint solve (08)"
   "$PYN" scripts/08_reconstruct_all22.py --root "$ROOT" --sideline "$SIDE" --endzone "$END" --no-mirror-check ${SEED_FROM:+--seed-from "$SEED_FROM"} ${GRID_PX:+--max-grid-px "$GRID_PX"} \
-     ${MIN_RECONCILED:+--min-reconciled "$MIN_RECONCILED"} --out "$P/recon.npz" 2>&1 | grep -v "Warning\|warn" \
+     ${MIN_RECONCILED:+--min-reconciled "$MIN_RECONCILED"} $PLAY_WINDOW --out "$P/recon.npz" 2>&1 | grep -v "Warning\|warn" \
      | grep -E "candidate|rulers|pass the|gap  |reconciled  |player height|] sideline |must reconcile|Error|Exit|refus" || fail paint
   rm -f "$P/.done_export" "$P/.done_refine" "$P/.done_shift" "$P/.done_endzone"
   mark paint
@@ -153,7 +158,7 @@ fi
 if ! done_ endzone; then
   log "endzone re-solve in the field frame with the mirror check (08 --sideline-from), then export again"
   "$PYN" scripts/08_reconstruct_all22.py --sideline-from "$P" --root "$ROOT" --sideline "$SIDE" --endzone "$END" \
-     ${MIN_RECONCILED:+--min-reconciled "$MIN_RECONCILED"} --out "$P/recon_abs.npz" 2>&1 | grep -v "Warning\|warn" \
+     ${MIN_RECONCILED:+--min-reconciled "$MIN_RECONCILED"} $PLAY_WINDOW --out "$P/recon_abs.npz" 2>&1 | grep -v "Warning\|warn" \
      | grep -E "mount side|mirror|gap  |reconciled  |player height|] sideline |must reconcile|Error|Exit" || fail endzone
   "$PYN" scripts/08b_export_play_dir.py --recon "$P/recon_abs.npz" --root "$ROOT" --sideline "$SIDE" --endzone "$END" --out "$P" \
      2>&1 | grep -v "Warning\|warn" | grep -E "cameras:|linked|tracks.parquet" || fail endzone-export

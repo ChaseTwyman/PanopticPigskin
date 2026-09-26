@@ -312,6 +312,11 @@ def main() -> None:
                          "Play 5 (2026-09-05) missed it by 2 px with both rulers agreeing at 0.95 "
                          "and players 1.72 m -- two of three witnesses -- so a play may widen it "
                          "explicitly; the value used is printed with the verdict")
+    ap.add_argument("--play-window", type=int, nargs=2, default=None, metavar=("LO", "HI"),
+                    help="sideline frames the player-based steps sample (default 15-85%% of the clip). Play 6 "
+                         "(2026-09-26) runs 220 frames past the tackle with the endzone zoomed on the sideline: "
+                         "its early frames reconcile 12-16 players, its late ones 4-6, and the median over both "
+                         "failed the endzone solve")
     ap.add_argument("--min-reconciled", type=int, default=None,
                     help="players the endzone's from-players solve must reconcile per frame (default "
                          "from_players.MIN_RECONCILED, 6). Play 6 (2026-09-26) reached 5 at a 0.66 m gap with "
@@ -391,10 +396,14 @@ def main() -> None:
     cands = believed
     print(f"   {len(cands)} candidate cameras")
 
-    # The same moments in both clips, away from the ends of the play.
+    # The same moments in both clips, away from the ends of the play. A frame the endzone solve cannot fit counts
+    # as zero players reconciled, so frames after the play (the endzone camera zoomed on a sideline) sink the
+    # median: --play-window keeps the sample inside the play when it is known.
     total = min(frame_count(side_path), frame_count(end_path))
-    want = np.linspace(int(0.15 * total), int(0.85 * total),
-                       args.play_frames).astype(int)
+    lo, hi = (int(0.15 * total), int(0.85 * total)) if args.play_window is None else args.play_window
+    want = np.linspace(lo, min(hi, total - 1), args.play_frames).astype(int)
+    if args.play_window is not None:
+        print(f"   players sampled over frames {lo}-{min(hi, total - 1)} (--play-window)")
 
     boxes_s, _w_s, _h_s = boxes_by_frame(model, side_path, want)
     boxes_e, w_e, h_e = boxes_by_frame(model, end_path, want)
