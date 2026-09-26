@@ -1,0 +1,62 @@
+[
+ {
+  "cam": "sideline",
+  "track_id": 15,
+  "frames": [
+   405,
+   422
+  ],
+  "id": 10,
+  "why": "#74, cost 0.8, ids before {15: 16}"
+ },
+ {
+  "cam": "sideline",
+  "track_id": 25,
+  "frames": [
+   269,
+   282
+  ],
+  "id": 17,
+  "why": "#52, cost 0.9, ids before {25: 13}"
+ },
+ {
+  "cam": "sideline",
+  "track_id": 25,
+  "frames": [
+   307,
+   314
+  ],
+  "id": 17,
+  "why": "#52, cost 0.6, ids before {25: 8}"
+ },
+ {
+  "cam": "sideline",
+  "track_id": 26,
+  "frames": [
+   250,
+   253
+  ],
+  "id": 107,
+  "why": "#62, cost 1.9, ids before {26: 4}"
+ },
+ {
+  "cam": "sideline",
+  "track_id": 26,
+  "frames": [
+   256,
+   270
+  ],
+  "id": 17,
+  "why": "#52, cost 0.3, ids before {26: 12}"
+ },
+ {
+  "cam": "sideline",
+  "track_id": 26,
+  "frames": [
+   283,
+   308
+  ],
+  "id": 17,
+  "why": "#52, cost 0.3, ids before {26: 26}"
+ }
+]
