@@ -27,6 +27,8 @@ Usage (the main environment; reads tracks.parquet, keypoints_2d[_ft2].parquet, c
 endzone clip):
   python tools/film/line_matcher.py --play-dir P --frames 250 420 --numbers 76 62 52 65 74 --ez-tracks 18 107 17 108 10 25 28
   python tools/film/line_matcher.py --play-dir P --frames 250 420 --men 76:18:106-292 62:107:106-440 ...
+  the defence's front the same way (numbers on their chests face the endzone camera behind the offence):
+  python tools/film/line_matcher.py --play-dir P --frames 250 420 --team BAL --other-kit 1 --numbers 92 98 99 ...
 """
 from __future__ import annotations
 
@@ -153,8 +155,8 @@ def main() -> None:
     ap.add_argument("--men", nargs="+", help="by hand instead of OCR: JERSEY:ENDZONE_TRACK:FIRST-LAST (sideline frames)")
     ap.add_argument("--ids", nargs="*", default=[], help="JERSEY:GLOBAL_ID, the id each man's rows belong under "
                     "(default: the global id his endzone pieces carry most)")
-    ap.add_argument("--defence-kit", type=int, default=0, help="kit label of the defence's boxes (08b: 1 = saturated)")
-    ap.add_argument("--offence", default="KC", help="the offence's team: rows under the defence's ids are left out")
+    ap.add_argument("--team", default="KC", help="the men's team (the offence for its line): rows under the other team's ids are left out")
+    ap.add_argument("--other-kit", type=int, default=0, help="kit label of the other team's boxes, left out (08b: 1 = the saturated kit)")
     ap.add_argument("--min-run", type=int, default=4)
     ap.add_argument("--plan-out", type=Path, default=None,
                     help="write the relabels as a plan for scripts/08zc_relabel_tracks.py (a swap needs it: 08z folds collide)")
@@ -168,7 +170,7 @@ def main() -> None:
         if not tracks:
             w = df[(df.cam == "endzone") & (df.frame >= lo + off) & (df.frame <= hi + off)]
             kit = w.groupby("track_id").kit.agg(lambda k: k.value_counts().index[0])
-            tracks = sorted(int(t) for t, k in kit.items() if k != args.defence_kit)
+            tracks = sorted(int(t) for t, k in kit.items() if k != args.other_kit)
         men = ocr_men(P, df, set(args.numbers), tracks, lo, hi, off)
     else:
         raise SystemExit("give --men, or --numbers (and optionally --ez-tracks)")
@@ -185,7 +187,7 @@ def main() -> None:
         gid_of[n] = votes.most_common(1)[0][0] if votes else None
         # an id the identity already names with this number wins over the vote (play 1: the centre's verified id is
         # 204, while his endzone rows late in the window sit under 174, an endzone-only id also named #52)
-        named = [k for k, v in merged.items() if getattr(v, "jersey", 0) == n and getattr(v, "team", None) == args.offence]
+        named = [k for k, v in merged.items() if getattr(v, "jersey", 0) == n and getattr(v, "team", None) == args.team]
         if named:
             # two ids named alike (an endzone-only split of the man): the one the sideline places him by
             win = df[(df.cam == "sideline") & (df.frame >= lo) & (df.frame <= hi)]
@@ -201,10 +203,10 @@ def main() -> None:
     import pickle
 
     team = {int(k): v.team for k, v in pickle.load(open(P / "identity_resolved.pkl", "rb"))["merged"].items()}
-    defence_ids = {k for k, v in team.items() if v not in (None, args.offence)}
+    defence_ids = {k for k, v in team.items() if v not in (None, args.team)}
     # a defender engaged with a lineman stands where the lineman stands: his rows would win the lineman's cost and
     # be proposed as the lineman's twin. Rows under the defence's ids and boxes in the defence's kit are left out.
-    side = df[(df.cam == "sideline") & (df.frame >= lo) & (df.frame <= hi) & (df.kit != args.defence_kit)
+    side = df[(df.cam == "sideline") & (df.frame >= lo) & (df.frame <= hi) & (df.kit != args.other_kit)
               & ~df.global_player_id.isin(defence_ids)]
     cost = collections.defaultdict(dict)       # sideline track -> {frame: {jersey: cost}}
     gid_at = collections.defaultdict(dict)     # sideline track -> {frame: current global id}
