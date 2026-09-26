@@ -1,0 +1,6 @@
+[
+ {"cam": "sideline", "track_id": 7, "frames": [286, 320], "id": 14, "why": "white after 285: the tight end's track took the Raven he blocked (kit; film 330)"},
+ {"cam": "sideline", "track_id": 14, "frames": [290, 359], "id": 7, "why": "red 293-350: the Raven's track took the tight end (film 330, 353)"},
+ {"cam": "sideline", "track_id": 11, "frames": [356, 551], "id": 7, "why": "the tight end's crossing route, y 6 -> -11.5 (film 380)"},
+ {"cam": "sideline", "track_id": 27, "frames": [329, 604], "id": 11, "why": "the linebacker, white throughout: 11's man after its own track took the tight end"}
+]

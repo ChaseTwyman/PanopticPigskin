@@ -1,0 +1,62 @@
+[
+ {
+  "cam": "sideline",
+  "track_id": 25,
+  "frames": [
+   223,
+   268
+  ],
+  "id": 107,
+  "why": "the left guard #62 before and just after the snap (line matcher #62; the formation's twelfth Chief)"
+ },
+ {
+  "cam": "sideline",
+  "track_id": 17,
+  "frames": [
+   269,
+   314
+  ],
+  "id": 107,
+  "why": "the left guard: under 158/204 (labelled BAL) at y 0.4-0.6, on the endzone's #62 (-16.6, 0.4) at 290-310"
+ },
+ {
+  "cam": "sideline",
+  "track_id": 28,
+  "frames": [
+   283,
+   334
+  ],
+  "id": 18,
+  "why": "the left tackle's sideline track after his own ended at 287 (0.38 m on)"
+ },
+ {
+  "cam": "endzone",
+  "track_id": 28,
+  "frames": [
+   266,
+   343
+  ],
+  "id": 18,
+  "why": "the left tackle: #76 read on this endzone track (line matcher)"
+ },
+ {
+  "cam": "sideline",
+  "track_id": 95,
+  "frames": [
+   293,
+   361
+  ],
+  "id": 20,
+  "why": "a second sideline track on Raven 20, 0.31 m median over 311-361"
+ },
+ {
+  "cam": "sideline",
+  "track_id": 45,
+  "frames": [
+   372,
+   395
+  ],
+  "id": 107,
+  "why": "the left guard's sideline box in the pocket: on the endzone's #62 within 0.7 m (372, 386); keeps his sideline span over the endzone-only stretch 315-371"
+ }
+]

@@ -24,3 +24,18 @@ PY="${PY_SMPLX:-python}"
 # census live 4.30 -> 3.87 (330-413 4.64 -> 3.96, 480-552 4.73 -> 3.93); 256-329 unchanged 2.32; steps unchanged
 # python tools/film/line_matcher.py --play-dir P --frames 230 450 --numbers 76 62 52 65 74 --plan-out line_plan_kc.json
 "$PY" scripts/08zc_relabel_tracks.py --play-dir "$P" --plan plays/bal_at_kc_2024_wk1/play_006/line_plan_kc.json --apply
+
+# --- batch 3: the tight end and the two Ravens on him (sideline kit colour per box + the film at 330, 353, 380):
+# the tight end's track took the Raven he blocked at 286, that Raven's track took the tight end, and the linebacker's
+# own track took the tight end on his crossing route at 356 while the linebacker ran on under a new id (170).
+# census live 3.87 -> 2.29 (256-329 2.32 -> 1.78, 330-413 3.96 -> 1.96, 480-552 3.93 -> 2.15); steps 29 -> 26
+"$PY" scripts/08zc_relabel_tracks.py --play-dir "$P" --plan plays/bal_at_kc_2024_wk1/play_006/plan_te.json --apply
+
+# --- batch 4: the formation's left side and Raven 20 (line matcher + ray/position checks against the endzone's
+# numbered tracks): the left guard #62 held twice at the snap (sideline t25 and the endzone-only id 107) and later
+# under the ids 158/204 labelled BAL; the left tackle's continuation (t28, both cameras); a second sideline track on
+# Raven 20 (t95, 0.31 m over 311-361).
+# census 256-329 1.78 -> 0.22 (61 of 74 frames exactly 11 v 11), 330-413 1.96 -> 1.50, live 2.29 -> 1.98; steps 26.
+# Cost: the guard's endzone-only frames after 395 are no longer drawn (his id now has a sideline span that ends at
+# 395; the loader leaves out endzone frames beyond it): 480-552 2.15 -> 2.95. He is out of the sideline view by then.
+"$PY" scripts/08zc_relabel_tracks.py --play-dir "$P" --plan plays/bal_at_kc_2024_wk1/play_006/plan_line_left.json --apply
