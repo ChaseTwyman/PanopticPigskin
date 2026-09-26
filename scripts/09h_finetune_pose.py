@@ -90,6 +90,8 @@ def main() -> None:
     ap.add_argument("--workers", type=int, default=2,
                     help="data-loading processes (0 loads in the main process; play 6 lost a worker at epoch 10)")
     ap.add_argument("--score-only", action="store_true", help="score --weights on the val frames, no training")
+    ap.add_argument("--resume", action="store_true",
+                    help="continue from <out>/train/weights/last.pt when a run left one (a crash costs the epochs since)")
     a = ap.parse_args()
     dataset, out = Path(a.dataset), Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -100,16 +102,32 @@ def main() -> None:
         return
     from ultralytics import YOLO
 
-    base = score(Path(a.weights), dataset, imgsz=a.imgsz)
-    (out / "score_baseline.json").write_text(json.dumps(base, indent=1))
+    base_file = out / "score_baseline.json"
+    last = out / "train" / "weights" / "last.pt"
+    if a.resume and base_file.exists():
+        base = json.loads(base_file.read_text())
+    else:
+        base = score(Path(a.weights), dataset, imgsz=a.imgsz)
+        base_file.write_text(json.dumps(base, indent=1))
     print("baseline:", json.dumps(base))
-    model = YOLO(str(a.weights))
-    # an ABSOLUTE project: ultralytics 8.4 nests a relative one under runs/pose/, and the weights then miss
-    # <out>/train/weights where this script and the pipeline read them (play 6, 2026-09-26)
-    model.train(data=str(dataset / "data.yaml"), epochs=a.epochs, imgsz=a.imgsz, batch=a.batch, freeze=a.freeze,
-                lr0=a.lr0, project=str(out.resolve()), name="train", exist_ok=True, plots=False, verbose=False,
-                fliplr=0.5, mosaic=0.0, degrees=0.0, scale=0.2, translate=0.05, hsv_h=0.0, hsv_s=0.2, hsv_v=0.2,
-                close_mosaic=0, workers=a.workers, patience=10)
+    if a.resume and last.exists():
+        # Play 6 (2026-09-26) died at epochs 10 and 20 of 30: the machine's commit charge (browsers and editors
+        # open beside it) reached its limit and an allocation failed. The checkpoint keeps every other argument.
+        print(f"resuming from {last}")
+        try:
+            YOLO(str(last)).train(resume=True)
+        except AssertionError as exc:                  # ultralytics: "... is finished, nothing to resume"
+            if "nothing to resume" not in str(exc):
+                raise
+            print(f"already trained: {exc}")
+    else:
+        model = YOLO(str(a.weights))
+        # an ABSOLUTE project: ultralytics 8.4 nests a relative one under runs/pose/, and the weights then miss
+        # <out>/train/weights where this script and the pipeline read them (play 6, 2026-09-26)
+        model.train(data=str(dataset / "data.yaml"), epochs=a.epochs, imgsz=a.imgsz, batch=a.batch, freeze=a.freeze,
+                    lr0=a.lr0, project=str(out.resolve()), name="train", exist_ok=True, plots=False, verbose=False,
+                    fliplr=0.5, mosaic=0.0, degrees=0.0, scale=0.2, translate=0.05, hsv_h=0.0, hsv_s=0.2, hsv_v=0.2,
+                    close_mosaic=0, workers=a.workers, patience=10)
     best = out / "train" / "weights" / "best.pt"
     ft = score(best, dataset, imgsz=a.imgsz)
     (out / "score_finetuned.json").write_text(json.dumps(ft, indent=1))

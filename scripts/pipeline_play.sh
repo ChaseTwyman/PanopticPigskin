@@ -451,7 +451,7 @@ if [ "${FINETUNE:-0}" = "1" ] && ! done_ finetune; then
   log "pose fine-tune: labels from the fit (09g, frames $FT_LO-$FT_HI), training (09h), keypoints (05m)"
   "$PYS" scripts/09g_pose_labels.py --play-dir "$P" --out "$P/pose_ds2" --lo "$FT_LO" --hi "$FT_HI" --stride 2 --val-every 5 \
      --refit "$P/poses_refit.json" 2>&1 | grep -v "Warning\|warn" | tail -3 || fail finetune
-  "$PYN" scripts/09h_finetune_pose.py --dataset "$P/pose_ds2" --weights yolov8x-pose.pt --out "$P/pose_ft2" --workers "${FT_WORKERS:-2}" 2>&1 \
+  "$PYN" scripts/09h_finetune_pose.py --dataset "$P/pose_ds2" --weights yolov8x-pose.pt --out "$P/pose_ft2" --workers "${FT_WORKERS:-2}" --resume 2>&1 \
      | grep -v "Warning\|warn" | tail -3 || fail finetune
   "$PYN" scripts/05m_keypoints_2d.py --play-dir "$P" --weights "$P/pose_ft2/train/weights/best.pt" --imgsz 1920 \
      --out "$P/keypoints_2d_ft2.parquet" 2>&1 | grep -v "Warning\|warn" | grep -E "keypoints:|matched|Error" || fail finetune
