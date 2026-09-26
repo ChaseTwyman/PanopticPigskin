@@ -1,0 +1,20 @@
+{
+  "play": "Ravens at Chiefs, 2024 week 1: KC 1-10 BLT 30 (Q2 7:15), Mahomes to Xavier Worthy, 12 yards",
+  "los_yards": 30,
+  "events": {
+    "fps": 59.94,
+    "snap": 256,
+    "release": 378,
+    "catch": 414,
+    "down": 552,
+    "passer": 8,
+    "receiver": 4
+  },
+  "clip": {
+    "start": 76,
+    "end": 552,
+    "tail": 8
+  },
+  "endzone_clip_offset": -1,
+  "note": "Frames are the sideline clip's (59.94 fps); the endzone clip runs endzone_clip_offset frames off it (05o, 0.12 m ray miss over 1169 pairs). All six events were read off the film by hand: the snap as the ball leaving the centre (256-257), the release in the endzone film (arm through 377-380), the catch where the ball reaches the carrier's hands in the endzone film (414; 14.5 m in 0.60 s, 24 m/s), the down where the carrier is brought down at the far sideline (549-552). The passer (8) is #15 on the film at 258-350; the receiver (4) is #1 on the sideline film at 396-448. Ids are this play's global player ids after the roles stage; Worthy's sideline track continues as id 12 from ~482 (not folded)."
+}
