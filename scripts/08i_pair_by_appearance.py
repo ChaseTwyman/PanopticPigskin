@@ -116,7 +116,6 @@ def main() -> None:
         key_to_gid[("sideline", t.tid)] = int(g)
     for t, g in zip(end, ge):
         key_to_gid[("endzone", t.tid)] = int(g)
-    n_all = len(key_to_gid)
     keys = list(zip(df["cam"].astype(str), df["track_id"].astype(int)))
     gid = np.array([key_to_gid.get(k, -1) for k in keys], int)
     # camera tracks too short for a series keep a unique id

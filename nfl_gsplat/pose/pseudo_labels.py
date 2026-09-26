@@ -23,7 +23,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from nfl_gsplat.pose.coco import COCO_FACE, COCO_TO_SMPLX
+from nfl_gsplat.pose.coco import COCO_TO_SMPLX
 
 AGREE_PX: float = 12.0        # a projection this close to a confident detection anchors the joint in that camera
 ANCHOR_CONF: float = 0.5      # ... with the detection at least this confident

@@ -223,7 +223,13 @@ def test_self_audit_drops_identity_shifted_frame():
     solved = [r for r in results if r is not None]
     assert len(solved) >= 35
     C_rec = solved[0].pose.center_world()
-    assert np.linalg.norm(C_rec - C_TRUE) < 0.5          # unpoisoned
+    # Unpoisoned = not pulled off the sight line. ALONG it a camera 97 m out on a 7000-8500 px lens sits in a
+    # focal/depth valley, and where the refit after the drop stops in it depends on the optimiser: 0.11 m on
+    # scipy 1.18, 0.65 m on scipy 1.17 (across the sight line 0.03 / 0.17 m). One bound per axis.
+    d = C_rec - C_TRUE
+    los = -C_TRUE / np.linalg.norm(C_TRUE)               # the pan targets straddle the field origin
+    assert np.linalg.norm(d - (d @ los) * los) < 0.5     # unpoisoned
+    assert abs(d @ los) < 0.01 * np.linalg.norm(C_TRUE)  # inside the depth valley: under 1 % of the range
 
 
 def test_self_audit_all_frames_bad_fails_loud(monkeypatch):

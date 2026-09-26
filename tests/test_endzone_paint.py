@@ -1,6 +1,5 @@
 """calibration.endzone_paint on synthetic geometry: registration, dash cleaning, per-frame fit, the centre."""
 import numpy as np
-import pytest
 
 from nfl_gsplat.calibration import endzone_paint as ep
 from nfl_gsplat.calibration.field_landmarks import GOAL_LINE_X_M, HASH_OFFSET_M, YARD_LINE_SPACING_M

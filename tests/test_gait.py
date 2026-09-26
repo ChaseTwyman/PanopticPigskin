@@ -89,7 +89,6 @@ def test_leg_yaw_turns_the_legs_onto_the_motion_and_runs_a_backpedal_backwards()
 
 def test_gait_sequence_plants_along_the_velocity_when_the_body_faces_across_it():
     """A body facing -y but moving along +x at 7 m/s: the stance ankle must stand still in the WORLD."""
-    from scipy.spatial.transform import Rotation as R_
     from nfl_gsplat.pose.forward_kinematics import load_smplx_skeleton, pose_params_to_rotmats, posed_joint_positions
     import pathlib
     if not pathlib.Path("data/body_models/smplx/SMPLX_NEUTRAL.npz").exists():

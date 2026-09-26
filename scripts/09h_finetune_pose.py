@@ -22,7 +22,6 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from nfl_gsplat.pose import pseudo_labels as pl  # noqa: E402
 
 
 def score(weights: Path, dataset: Path, *, imgsz: int, conf: float = 0.25) -> dict:

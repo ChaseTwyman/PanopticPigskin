@@ -40,17 +40,15 @@ markers = [
 addopts = "-ra --strict-markers"
 
 [tool.ruff]
-line-length = 110
+line-length = 120
 target-version = "py310"
 
 [tool.ruff.lint]
-# SELECT EXPLICITLY. Without this line ruff applies its DEFAULT rule set, and
-# that set grows with every release -- while CI installed ruff unpinned, so the
-# lint job broke on its own with no code change behind it. By ruff 0.16 the
-# default had pulled in I, B, UP, SIM, RUF, PL, S, C4 and FURB: 309 findings
-# against the 32 reported by the rules this project actually chose. Naming the
-# set here is what stops a linter release from becoming a repo-wide diff.
+# Select explicitly: ruff's default rule set grows with every release, and a linter
+# release must not turn into a repo-wide diff (CI pins the ruff version too).
 select = ["E", "F"]
-# E702 (multi-statement-on-one-line semicolon) is intentional for tight numpy
-# array initializers and test scaffolding. Keep the rest of E + F.
-ignore = ["E702"]
+# Not linted, by choice: E501 (lines are wrapped by hand, most near 120; long
+# measured-value comments stay on one line), E702 (semicolons in tight numpy
+# initialisers and test scaffolding), E731 (small named lambdas in tests and
+# builders), E741 (`l` for a length or a limb where the maths names it so).
+ignore = ["E501", "E702", "E731", "E741"]

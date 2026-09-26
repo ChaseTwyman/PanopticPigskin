@@ -16,9 +16,6 @@ def test_whiten_scales_only_along_the_direction():
 
 
 def test_depth_direction_is_the_optical_axis_on_the_ground():
-    import cv2
-
-    R = cv2.Rodrigues(np.array([0.0, 0.0, 0.0]))[0]                   # camera z = world z: no ground component
     assert np.allclose(link3d.depth_direction(np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]], float)), [0.0, 1.0])
 
 

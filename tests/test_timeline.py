@@ -728,7 +728,6 @@ def _st_(pid, x, y):
 
 
 def test_stand_still_bridges_a_close_hole_and_holds_a_slow_end_but_not_where_a_teammate_stands():
-    import numpy as np
 
     from nfl_gsplat.render import timeline as tlm
 
@@ -1285,7 +1284,6 @@ def test_stand_still_bridge_blends_the_pose_across_the_hole():
     whole state into the first half and the far end's into the second -- his elbow went from 9 to 76 degrees in one
     frame at the midpoint (hinge jerk 67 deg/frame^2). The bridge now SLERPs the body pose and the orientation."""
     import numpy as np
-    from scipy.spatial.transform import Rotation
 
     from nfl_gsplat.render import timeline as tlm
 

@@ -9,7 +9,6 @@ Usage:
 import argparse
 import collections
 import json
-import math
 
 import numpy as np
 

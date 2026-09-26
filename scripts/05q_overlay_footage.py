@@ -38,7 +38,6 @@ import numpy as np
 import pandas as pd
 import torch
 
-from nfl_gsplat.calibration.cameras_io import load_camera_track
 from nfl_gsplat.pose.forward_kinematics import SMPLX_BODY_PARENTS
 from nfl_gsplat.render.play_timeline import clip_offset, load_play_timeline
 

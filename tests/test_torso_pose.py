@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 
-from nfl_gsplat.identity.torso_colours import detection_colours, polygon_colour, torso_polygon
+from nfl_gsplat.identity.torso_colours import polygon_colour, torso_polygon
 
 
 def test_the_polygon_is_the_shoulders_and_hips_pulled_in():

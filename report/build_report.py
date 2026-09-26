@@ -275,8 +275,8 @@ def sy(y):
 
 svg = [f'<svg class="field" viewBox="0 0 {W} {H}" role="img" aria-labelledby="fieldTitle fieldDesc">',
        '<title id="fieldTitle">Play diagram, top-down</title>',
-       f'<desc id="fieldDesc">Every player\'s path from the snap: Chiefs in red attacking left, Ravens in violet. Gray\'s route is '
-       f'the heavy line; the dotted line is the ball from Mahomes to Gray; the ring marks the catch and the cross the down.</desc>',
+       '<desc id="fieldDesc">Every player\'s path from the snap: Chiefs in red attacking left, Ravens in violet. Gray\'s route is '
+       'the heavy line; the dotted line is the ball from Mahomes to Gray; the ring marks the catch and the cross the down.</desc>',
        f'<rect x="0" y="{PADT}" width="{W}" height="{H - PADT - 14}" class="turf"/>']
 k = math.ceil((xmin - GOAL) / (5 * YD))
 while GOAL + k * 5 * YD < xmax:
@@ -406,8 +406,9 @@ for p in sorted(OPT, key=lambda p: -OPT[p]["lead_yd"]):
     by = P[o["by"]][1] if o["by"] in P else str(o["by"])
     cls = ' class="thrown"' if p == 74 else ''
     tag = ' <em>thrown</em>' if p == 74 else ''
+    lead = f"{o['lead_yd']:.1f}"
     opt_rows.append(f"<tr{cls}><td>{esc(full(p))}{tag}</td>"
-                    f"<td class='num'>{mn(f'{o['lead_yd']:.1f}')}</td><td class='num'>{R[p]['sep_release_m']:.1f}</td>"
+                    f"<td class='num'>{mn(lead)}</td><td class='num'>{R[p]['sep_release_m']:.1f}</td>"
                     f"<td class='num'>{mn(f'{m:+.2f}')} {bar}</td><td>{esc(by)}</td></tr>")
 OPT_TABLE = ("<table class='opts'><thead><tr><th>Receiver</th><th>Catch point, yd past the line</th><th>Nearest Raven, m</th>"
              "<th>Reach margin, s</th><th>Limited by</th></tr></thead><tbody>" + "".join(opt_rows) + "</tbody></table>")

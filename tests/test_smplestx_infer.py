@@ -1,5 +1,10 @@
 
 
+import pytest
+
+pytest.importorskip("torch")        # the checkpoint checks write and read real torch checkpoints
+
+
 # --- the strict=False residue must be body-model constants, nothing else ------
 # SMPLest-X loads with strict=False and prints "Please check manually" every
 # run. That warning cannot tell a fully loaded network from one missing half

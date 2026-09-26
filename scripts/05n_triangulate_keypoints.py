@@ -33,7 +33,6 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from nfl_gsplat.calibration.cameras_io import load_camera_track  # noqa: E402
-from nfl_gsplat.pose.forward_kinematics import NUM_BODY_JOINTS  # noqa: E402
 from nfl_gsplat.pose.triangulate import TriangulationConfig, triangulate_joints_two_view  # noqa: E402
 from nfl_gsplat.utils.logging import get_logger  # noqa: E402
 

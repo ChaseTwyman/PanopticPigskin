@@ -288,7 +288,7 @@ def main() -> None:
     pickle.dump({"merged": merged, "stitch": {}},
                 open(play / "identity_resolved.pkl", "wb"))
     if specialists:
-        print(f"   not on the field on a scrimmage down (--kicking-play to allow): "
+        print("   not on the field on a scrimmage down (--kicking-play to allow): "
               + ", ".join(f"id {g} #{j} {n} ({p})" for g, j, n, p in specialists)[:300])
     if overruled:
         print(f"   kit overruled the number on {len(overruled)} ids: "

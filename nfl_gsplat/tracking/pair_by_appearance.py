@@ -239,7 +239,6 @@ def cam_tracks_from_frame(df, cams, *, kit_margin: float = 0.4, min_number_votes
     in for the box-bottom ground point where a camera has the player's ankles:
     the box point sits 0.3-0.5 m off the feet (play 1, against the two cameras'
     triangulated ankles), which the position gate feels."""
-    import pandas as pd
 
     from nfl_gsplat.calibration.from_players import feet_of
     from nfl_gsplat.calibration.joint_views import ground_points

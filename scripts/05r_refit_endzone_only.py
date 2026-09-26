@@ -36,7 +36,7 @@ from scipy.spatial.transform import Rotation
 
 from nfl_gsplat.calibration.cameras_io import load_camera_track
 from nfl_gsplat.pose.coco import coco_to_body
-from nfl_gsplat.pose.fit_mono2d import Mono2DConfig, merge_into_refit
+from nfl_gsplat.pose.fit_mono2d import merge_into_refit
 from nfl_gsplat.pose.keypoint_filter import reject_outliers
 from nfl_gsplat.render.play_timeline import ankle_ground, clip_offset, ground_positions
 

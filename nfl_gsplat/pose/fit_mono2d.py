@@ -386,7 +386,6 @@ def rigid_start_2d(rest_joints, ground_xy, cam, uv, conf, forward, base_cfg, ini
     wins on noise and drags the fit into the wrong arm basin)."""
     from scipy.spatial.transform import Rotation
 
-    rest = np.asarray(rest_joints, float)
     bp = np.zeros(base_cfg.body_pose_dim) if init_body_pose is None else np.asarray(init_body_pose, float).reshape(-1)
     uvs, confs, cams = _views(uv, conf, cam)
     uv, conf, (K, R, t) = uvs[0], confs[0], cams[0]              # the start is scored on the first view
