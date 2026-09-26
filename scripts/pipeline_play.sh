@@ -53,6 +53,7 @@
 #   ENDZONE_WEIGHT [0.3]  the endzone keypoints' weight in the two-view fit; 0 or ONE_VIEW=1: sideline only
 #   REFIT_EZ [1]      0 skips the endzone-only fits;  KICKING [0]: 1 for a kickoff, punt or field goal
 #   SEED_FROM GRID_PX the paint solve (08): a solved play-dir of the same game to seed the mount; a wider grid judge
+#   MIN_RECONCILED    lower the endzone-from-players minimum (08, default 6) for one play; check the gap and heights
 #   PAIR_ADDITIONS_ONLY [0], CUT_TO_FRAME  the pair and switches stages' scope;  DIAG [outputs/diag] the reports
 #   STOP_AFTER        stop once that stage is marked done, e.g. refit_mono: the ids are final there, so the passer's
 #                     id (QB) can be read off the film before the ball stage; re-run without it to continue
@@ -113,7 +114,8 @@ fi
 if [ "$FROM_PAINT" = 1 ] && ! done_ paint; then
   log "paint solve (08)"
   "$PYN" scripts/08_reconstruct_all22.py --root "$ROOT" --sideline "$SIDE" --endzone "$END" --no-mirror-check ${SEED_FROM:+--seed-from "$SEED_FROM"} ${GRID_PX:+--max-grid-px "$GRID_PX"} \
-     --out "$P/recon.npz" 2>&1 | grep -v "Warning\|warn" | grep -E "candidate|rulers|pass the|gap  |reconciled  |player height|Error|Exit|refus" || fail paint
+     ${MIN_RECONCILED:+--min-reconciled "$MIN_RECONCILED"} --out "$P/recon.npz" 2>&1 | grep -v "Warning\|warn" \
+     | grep -E "candidate|rulers|pass the|gap  |reconciled  |player height|] sideline |must reconcile|Error|Exit|refus" || fail paint
   rm -f "$P/.done_export" "$P/.done_refine" "$P/.done_shift" "$P/.done_endzone"
   mark paint
 fi
@@ -151,7 +153,8 @@ fi
 if ! done_ endzone; then
   log "endzone re-solve in the field frame with the mirror check (08 --sideline-from), then export again"
   "$PYN" scripts/08_reconstruct_all22.py --sideline-from "$P" --root "$ROOT" --sideline "$SIDE" --endzone "$END" \
-     --out "$P/recon_abs.npz" 2>&1 | grep -v "Warning\|warn" | grep -E "mount side|mirror|gap  |reconciled  |player height|Error|Exit" || fail endzone
+     ${MIN_RECONCILED:+--min-reconciled "$MIN_RECONCILED"} --out "$P/recon_abs.npz" 2>&1 | grep -v "Warning\|warn" \
+     | grep -E "mount side|mirror|gap  |reconciled  |player height|] sideline |must reconcile|Error|Exit" || fail endzone
   "$PYN" scripts/08b_export_play_dir.py --recon "$P/recon_abs.npz" --root "$ROOT" --sideline "$SIDE" --endzone "$END" --out "$P" \
      2>&1 | grep -v "Warning\|warn" | grep -E "cameras:|linked|tracks.parquet" || fail endzone-export
   rm -f "$P"/.done_pose_s "$P"/.done_pose_e "$P"/.done_identity "$P"/.done_keypoints "$P"/.done_tri "$P"/.done_refit "$P"/.done_refit_mono "$P"/.done_refit_ez "$P"/.done_render \

@@ -312,6 +312,11 @@ def main() -> None:
                          "Play 5 (2026-09-05) missed it by 2 px with both rulers agreeing at 0.95 "
                          "and players 1.72 m -- two of three witnesses -- so a play may widen it "
                          "explicitly; the value used is printed with the verdict")
+    ap.add_argument("--min-reconciled", type=int, default=None,
+                    help="players the endzone's from-players solve must reconcile per frame (default "
+                         "from_players.MIN_RECONCILED, 6). Play 6 (2026-09-26) reached 5 at a 0.66 m gap with "
+                         "players 1.83 m tall -- the other two witnesses passing -- so a play may lower it "
+                         "explicitly; the value used is printed")
     ap.add_argument("--no-ruler-gate", action="store_true",
                     help="skip reading the hash and numeral rows through each sideline "
                          "candidate before the endzone solves")
@@ -433,6 +438,10 @@ def main() -> None:
           f"{np.median([len(b) for b in boxes_e.values()]):.0f}")
 
     # Choose the sideline candidate by what the OTHER view can reconcile.
+    ez_kw = {} if args.min_reconciled is None else {"min_reconciled": args.min_reconciled}
+    if ez_kw:
+        print(f"   endzone solve must reconcile {args.min_reconciled} players/frame "
+              "(--min-reconciled; default 6)")
     best = None
     for i, cand in enumerate(cands[:args.top]):
         cams_s = cand["cams"]
@@ -441,7 +450,7 @@ def main() -> None:
                 f"{q['fov_deg']:.1f} deg, players {q['player_cost']:.2f}, "
                 f"sees {100 * q['coverage']:.0f}%")
         try:
-            cams_e, info = solve_second_view(cams_s, feet_s, boxes_e, w_e, h_e)
+            cams_e, info = solve_second_view(cams_s, feet_s, boxes_e, w_e, h_e, **ez_kw)
         except CalibrationError as exc:
             print(f"{head}: {str(exc)[:80]}")
             continue
@@ -465,7 +474,7 @@ def main() -> None:
     if not args.no_mirror_check:
         try:
             cams_m, info_m = solve_second_view(cams_s, feet_s, boxes_e, w_e, h_e,
-                                               mounts=[mirrored_mount(info["mount"])])
+                                               mounts=[mirrored_mount(info["mount"])], **ez_kw)
         except CalibrationError as exc:
             print(f"   mirror mount {mirrored_mount(info['mount'])}: {str(exc)[:80]}")
             cams_m = None
