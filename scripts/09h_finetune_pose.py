@@ -87,6 +87,8 @@ def main() -> None:
     ap.add_argument("--batch", type=int, default=2)
     ap.add_argument("--freeze", type=int, default=10, help="backbone layers frozen")
     ap.add_argument("--lr0", type=float, default=0.002)
+    ap.add_argument("--workers", type=int, default=2,
+                    help="data-loading processes (0 loads in the main process; play 6 lost a worker at epoch 10)")
     ap.add_argument("--score-only", action="store_true", help="score --weights on the val frames, no training")
     a = ap.parse_args()
     dataset, out = Path(a.dataset), Path(a.out)
@@ -102,10 +104,12 @@ def main() -> None:
     (out / "score_baseline.json").write_text(json.dumps(base, indent=1))
     print("baseline:", json.dumps(base))
     model = YOLO(str(a.weights))
+    # an ABSOLUTE project: ultralytics 8.4 nests a relative one under runs/pose/, and the weights then miss
+    # <out>/train/weights where this script and the pipeline read them (play 6, 2026-09-26)
     model.train(data=str(dataset / "data.yaml"), epochs=a.epochs, imgsz=a.imgsz, batch=a.batch, freeze=a.freeze,
-                lr0=a.lr0, project=str(out), name="train", exist_ok=True, plots=False, verbose=False,
+                lr0=a.lr0, project=str(out.resolve()), name="train", exist_ok=True, plots=False, verbose=False,
                 fliplr=0.5, mosaic=0.0, degrees=0.0, scale=0.2, translate=0.05, hsv_h=0.0, hsv_s=0.2, hsv_v=0.2,
-                close_mosaic=0, workers=2, patience=10)
+                close_mosaic=0, workers=a.workers, patience=10)
     best = out / "train" / "weights" / "best.pt"
     ft = score(best, dataset, imgsz=a.imgsz)
     (out / "score_finetuned.json").write_text(json.dumps(ft, indent=1))

@@ -48,3 +48,6 @@ tests/fixtures/generated/
 # The demo site's build output and dependencies
 site/node_modules/
 site/dist/
+
+# Ultralytics default output folder (09h passes an absolute project; this is a safety net)
+/runs/

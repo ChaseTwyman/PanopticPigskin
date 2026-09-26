@@ -55,6 +55,7 @@
 #   FINETUNE [0]      1 = the pose fine-tune pass;  FIELD [footage]: procedural renders on a painted field
 #   ENDZONE_WEIGHT [0.3]  the endzone keypoints' weight in the two-view fit; 0 or ONE_VIEW=1: sideline only
 #   REFIT_EZ [1]      0 skips the endzone-only fits;  KICKING [0]: 1 for a kickoff, punt or field goal
+#   FT_WORKERS [2]    the fine-tune's data-loading processes (0: in the main process; slower, never loses a worker)
 #   SEED_FROM GRID_PX the paint solve (08): a solved play-dir of the same game to seed the mount; a wider grid judge
 #   MIN_RECONCILED    lower the endzone-from-players minimum (08, default 6) for one play; check the gap and heights
 #   EZ_CENTRE "x y z" hold the endzone mount (08l) where a play of the same game and half solved it, when too few
@@ -450,7 +451,7 @@ if [ "${FINETUNE:-0}" = "1" ] && ! done_ finetune; then
   log "pose fine-tune: labels from the fit (09g, frames $FT_LO-$FT_HI), training (09h), keypoints (05m)"
   "$PYS" scripts/09g_pose_labels.py --play-dir "$P" --out "$P/pose_ds2" --lo "$FT_LO" --hi "$FT_HI" --stride 2 --val-every 5 \
      --refit "$P/poses_refit.json" 2>&1 | grep -v "Warning\|warn" | tail -3 || fail finetune
-  "$PYN" scripts/09h_finetune_pose.py --dataset "$P/pose_ds2" --weights yolov8x-pose.pt --out "$P/pose_ft2" 2>&1 \
+  "$PYN" scripts/09h_finetune_pose.py --dataset "$P/pose_ds2" --weights yolov8x-pose.pt --out "$P/pose_ft2" --workers "${FT_WORKERS:-2}" 2>&1 \
      | grep -v "Warning\|warn" | tail -3 || fail finetune
   "$PYN" scripts/05m_keypoints_2d.py --play-dir "$P" --weights "$P/pose_ft2/train/weights/best.pt" --imgsz 1920 \
      --out "$P/keypoints_2d_ft2.parquet" 2>&1 | grep -v "Warning\|warn" | grep -E "keypoints:|matched|Error" || fail finetune
