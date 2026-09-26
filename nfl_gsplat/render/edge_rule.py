@@ -8,7 +8,7 @@ endzone-only, default-posed. Play 1's equivalents are photographers beyond
 the end line, an official at the goal line, and three people on the
 sideline.
 
-MEASURED 2026-09-05 (the /btw fork's rule_b.py): play 2 drops 19
+MEASURED 2026-09-05: play 2 drops 19
 endzone-only ids (10 % of timeline states, all behind the offence); play 1
 drops 23 (3 sideline, 20 late in the end zone); no sure identity (roster
 name with a team+number unique in the play) among them; the one real

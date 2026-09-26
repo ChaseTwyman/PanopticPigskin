@@ -71,7 +71,9 @@ and never start by themselves for visitors who ask for reduced motion.
 
 Drop in new files with the same names: `public/embed/playground/index.html` (plus
 `play_joints.json` next to it) and `public/embed/report/index.html`. The site links to them
-by those paths, so nothing else changes.
+by those paths, so nothing else changes. The first is the repo's `viewer/play_room.html`, the
+second what `report/build_report.py` writes; the pipeline's `export_data` stage writes
+`play_joints.json`.
 
 Both files are complete documents: a `<!doctype html>`, `<html lang="en">`, and a `<head>`
 with `<meta charset="utf-8">` and a viewport meta around the page's own

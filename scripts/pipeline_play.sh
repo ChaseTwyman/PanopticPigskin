@@ -1,7 +1,8 @@
 #!/bin/bash
 # One All-22 play, end to end, RESUMABLE. Every stage leaves a marker in the play-dir (.done_<stage>) and is skipped
-# when the marker exists; --fresh wipes the markers and the stage outputs first. A run that dies mid-stage costs that
-# stage only: re-run the same command and it continues.
+# when the marker exists; --fresh clears every marker, so every stage runs again, and first deletes the identity,
+# pose and keypoint outputs a re-run would otherwise read back. A run that dies mid-stage costs that stage only:
+# re-run the same command and it continues.
 #
 #   bash scripts/pipeline_play.sh <play-dir> <sideline.mp4> <endzone.mp4> <los-yards> [--fresh] [--from-paint]
 #
@@ -39,10 +40,20 @@
 #              then the fit stages re-run on the fine-tuned keypoints          [FINETUNE=1]
 #   measure    07l the rulers on the timeline the renderer draws             -> $DIAG/<play>_latest_plausibility.json
 #   render     05k hero follow camera, skycam, the sideline broadcast pose   -> render_hifi*/, render_view/
-#   export     05k --export-joints (the Film Room), export_timeline.py       -> play_joints.json, timeline.json
+#   export_data 05k --export-joints (the Film Room), export_timeline.py      -> play_joints.json, timeline.json
 #
 # Hand-read inputs (see plays/): SNAP, QB, DOWN for the ball stage; <play-dir>/film_reads.json for men no camera can
 # place; identity fixes read off the film with tools/film and applied with 08z (fold) / 08za (drop) between runs.
+#
+# Knobs (environment variables, defaults in brackets):
+#   RED [KC]          the team in the coloured kit; 08c splits the two kits on it. One of the game's two teams.
+#   OFFENCE [$RED]    the team with the ball: its pre-snap formation gives unnamed ids their builds (08n)
+#   SNAP QB DOWN      the ball stage's hand-read inputs: the snap frame, the passer's id, the frame the carrier is down
+#   FINETUNE [0]      1 = the pose fine-tune pass;  FIELD [footage]: procedural renders on a painted field
+#   ENDZONE_WEIGHT [0.3]  the endzone keypoints' weight in the two-view fit; 0 or ONE_VIEW=1: sideline only
+#   REFIT_EZ [1]      0 skips the endzone-only fits;  KICKING [0]: 1 for a kickoff, punt or field goal
+#   SEED_FROM GRID_PX the paint solve (08): a solved play-dir of the same game to seed the mount; a wider grid judge
+#   PAIR_ADDITIONS_ONLY [0], CUT_TO_FRAME  the pair and switches stages' scope;  DIAG [outputs/diag] the reports
 set -u
 # KICKING=1 for a kickoff, punt or field goal: kickers, punters and long snappers
 # may be named (08c vetoes them on scrimmage downs; play 1 named the kicker twice).
@@ -69,7 +80,7 @@ PYN="${PY_MAIN:-python}"; PYS="${PY_SMPLX:-python}"
 cd "$REPO" || exit 1
 P="$1"; SIDE="$2"; END="$3"; LOS="$4"; shift 4
 DIAG="${DIAG:-$REPO/outputs/diag}"; PLAY="$(basename "$P")"; mkdir -p "$DIAG"
-RED="${RED:-KC}"; WHITE="${WHITE:-BAL}"          # the saturated and the white kit (08c, render.uniform)
+RED="${RED:-KC}"                                 # the team in the coloured kit (08c --saturated)
 OFFENCE="${OFFENCE:-$RED}"                       # the team with the ball: its formation gives the roles (08n)
 SEED_FROM="${SEED_FROM:-}"                       # a solved play-dir of the same game: its sideline mount seeds 08
 GRID_PX="${GRID_PX:-}"                           # widen 08's grid judge for ONE play (px); printed with the verdict

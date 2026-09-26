@@ -78,8 +78,10 @@ bash scripts/pipeline_play.sh data/all22/<game>/<play> <play>/sideline.mp4 <play
 ```
 
 Every stage leaves a `.done_<stage>` marker in the play folder and is skipped on the next run; re-run the same command
-to resume. The header of `scripts/pipeline_play.sh` lists every stage, its script and its outputs. Knobs are
-environment variables: `SNAP`, `QB`, `DOWN` (§7), `FINETUNE=1`, `FIELD=procedural`, `ENDZONE_WEIGHT`, `KICKING=1`.
+to resume. The header of `scripts/pipeline_play.sh` lists every stage, its script and its outputs, and every knob
+(environment variables) with its default. For a game other than the demo's, set `RED` to the team in the coloured
+kit (one of the game's two teams; `08c` stops with a `SetupError` otherwise) and `OFFENCE` to the team with the
+ball (default `RED`); `SNAP`, `QB` and `DOWN` are the ball stage's hand-read inputs (§7).
 
 ## §7 Hand-read inputs
 

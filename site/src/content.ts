@@ -112,7 +112,7 @@ export const STATS = [
   { value: "100%", label: "of frames from snap to whistle with exactly 11 players a side" },
   { value: "0", label: "live frames where a body jumps over 0.25 m" },
   { value: "2", label: "broadcast cameras, each solved on every frame" },
-  { value: "6.7 s", label: "of play, 400 frames at 59.94 fps" },
+  { value: "6.7 s", label: "of play, 401 frames at 59.94 fps" },
 ] as const;
 
 export const FAQS = [

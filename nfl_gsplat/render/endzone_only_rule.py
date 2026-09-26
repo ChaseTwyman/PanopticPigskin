@@ -689,7 +689,7 @@ def pocket_vouch(ground, views, side_ground, *, snap: int, end: int, teams: dict
 # frame: off 0.520; the vouched ids' holes only (38: 28 frames) 0.462, exact-eleven frames 91 -> 96; plus
 # every empty spot (36 more frames: 172, 98, 82 ...) 0.427, exact 102, frames at ten or fewer 46 -> 28,
 # at twelve or more 34 -> 41. The loader's presnap_fill takes False / "vouched" / True.
-# DEAD CODE 2026-09-20..25 (5779113 nested the loader's block under the switched-off short-team vouch); moved back
+# DEAD CODE 2026-09-20..25 (an edit nested the loader's block under the switched-off short-team vouch); moved back
 # 2026-09-25 with the default OFF -- the state v110-v112 shipped -- until re-measured on today's tables.
 # RE-MEASURED 2026-09-25 (v113): on the live tables pre-snap |KC-11| 0.511 -> 0.400; the one drawn change is Trey
 # Smith (76) on 22 more pre-snap frames (150 -> 172 of 180: his endzone-only frames the span rule took against the

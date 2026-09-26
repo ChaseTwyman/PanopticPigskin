@@ -32,7 +32,7 @@ def _enclosing_ifs(tree, target_name):
 
 
 def test_presnap_fill_runs_with_the_line_vouch_not_under_another_vouch():
-    """5779113 (2026-09-20) inserted the short-team vouch above the pre-snap fill and the fill became the body of that
+    """An edit on 2026-09-20 inserted the short-team vouch above the pre-snap fill and the fill became the body of that
     switched-off vouch's ``if``: dead code for five days (play 1's pre-snap census 0.43 -> 0.51 unnoticed)."""
     src = (Path(__file__).resolve().parents[1] / "nfl_gsplat" / "render" / "play_timeline.py").read_text(encoding="utf-8")
     calls = _enclosing_ifs(ast.parse(src), "fill_presnap_holes")
