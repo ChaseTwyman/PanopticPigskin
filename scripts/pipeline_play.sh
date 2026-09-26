@@ -54,6 +54,8 @@
 #   REFIT_EZ [1]      0 skips the endzone-only fits;  KICKING [0]: 1 for a kickoff, punt or field goal
 #   SEED_FROM GRID_PX the paint solve (08): a solved play-dir of the same game to seed the mount; a wider grid judge
 #   PAIR_ADDITIONS_ONLY [0], CUT_TO_FRAME  the pair and switches stages' scope;  DIAG [outputs/diag] the reports
+#   STOP_AFTER        stop once that stage is marked done, e.g. refit_mono: the ids are final there, so the passer's
+#                     id (QB) can be read off the film before the ball stage; re-run without it to continue
 set -u
 # KICKING=1 for a kickoff, punt or field goal: kickers, punters and long snappers
 # may be named (08c vetoes them on scrimmage downs; play 1 named the kicker twice).
@@ -94,7 +96,10 @@ mkdir -p "$P"
 
 log()  { echo; echo "=== $(date +%H:%M:%S) [$NAME] $1"; }
 done_() { [ -f "$P/.done_$1" ]; }
-mark() { date +%s > "$P/.done_$1"; }
+mark() {
+  date +%s > "$P/.done_$1"
+  if [ "${STOP_AFTER:-}" = "$1" ]; then log "STOP_AFTER=$1: stopping here; re-run without it to continue"; exit 0; fi
+}
 fail() { echo "FAILED at $1 -- re-run the same command to resume"; exit 1; }
 
 if [ "$FRESH" = 1 ]; then
