@@ -97,15 +97,31 @@ Work on a copy, keep a fix only if the rulers hold, and record every command, so
    shows. Wrong number, team or role: `scripts/08zb_set_identity.py` (a wrong number becomes a wrong role and a wrong
    build — a centre read as #92 became a defensive tackle and broke the quarterback rule). Two ids on one man:
    `scripts/08z_fold_ids.py` or `scripts/08za_drop_rows.py`.
-4. **Handovers and twins**, in frame order. For each: `scripts/09c_track_audit.py` for the camera tracks and ground
-   points, then the film (`09b_film_strip.py`, `tools/film/id_strip.py`) in both cameras. The decision is one of:
-   fold one camera track's frames into the man's id (`08z --keep K --drop D --cam C --track-id T --frames a b`),
-   drop a second copy (`08za`), or leave it (a new man, or a man leaving the view). At the line, the endzone tracks
-   are the anchor: the endzone sees linemen side by side with their numbers; the sideline sees them one behind
-   another.
-5. **Measure each batch** on the copy (the census by stretch, steps over 0.25 m). Keep a batch only if neither gets
-   worse; a fold that is true on the film but measures worse points at a rule that relied on the wrong identity.
-6. **Record** every kept command in `plays/<game>/<play>/identity_fixes.sh`.
+4. **The offensive line, by machine.** The sideline tracker swaps linemen whenever they overlap; the endzone sees
+   them side by side with their numbers on their backs. `tools/film/line_matcher.py` reads those numbers on the
+   endzone tracks, gives every sideline track its lineman frame by frame, and writes the relabels as a plan:
+   ```bash
+   $PY_MAIN tools/film/line_matcher.py --play-dir P_fix --frames SNAP-25 SNAP+200 --numbers 76 62 52 65 74 --plan-out plan.json
+   $PY_SMPLX scripts/08zc_relabel_tracks.py --play-dir P_fix --plan plan.json --apply
+   ```
+   `08zc` applies a plan in one step, so two tracks that traded ids trade back (a pair of `08z` folds would collide
+   and delete one man's box). The matcher proposed nothing on play 1's verified line and undid two planted swaps
+   exactly; it only reports twins, never drops them. The same tool reads the defence's chest numbers
+   (`--team BAL --other-kit 1`), when the OCR can read them.
+5. **Handovers and twins**, in frame order. For each: `scripts/09c_track_audit.py` for the camera tracks and ground
+   points, then the film (`09b_film_strip.py`, `tools/film/id_strip.py`) in both cameras; across teams, each sideline
+   box's kit colour (red, white, unreadable) over time shows who a track holds. The decision is one of: move a camera
+   track's frames to the man's id (a plan for `08zc`, or `08z --keep K --drop D --cam C --track-id T --frames a b`),
+   drop a second copy (`08za`), or leave it (a new man, or a man leaving the view). Build each man's whole chain
+   before relabelling his pieces: a piece moved alone can leave another man's only drawn copy behind, or lengthen an
+   id's sideline span so the loader drops its endzone frames beyond it.
+6. **Measure each batch** on the copy (the census by stretch, steps over 0.25 m). Keep a batch only if neither gets
+   worse; a fold that is true on the film but measures worse points at a rule that relied on the wrong identity, or
+   at the next piece of the same man's chain.
+7. **Record** every kept batch in `plays/<game>/<play>/identity_fixes.sh`, with its plan file and its measurement.
+
+After the catch the broadcast cameras follow the ball: men far from it leave both views, and no identity fix draws a
+man neither camera sees. Judge the census there against the men in view, not against eleven.
 
 ## 6. Re-render, measure, record (~2 h)
 

@@ -39,3 +39,15 @@ PY="${PY_SMPLX:-python}"
 # Cost: the guard's endzone-only frames after 395 are no longer drawn (his id now has a sideline span that ends at
 # 395; the loader leaves out endzone frames beyond it): 480-552 2.15 -> 2.95. He is out of the sideline view by then.
 "$PY" scripts/08zc_relabel_tracks.py --play-dir "$P" --plan plays/bal_at_kc_2024_wk1/play_006/plan_line_left.json --apply
+
+# --- batch 5: the ball carrier after the catch (sideline kit colour per box, the film at 490-545): Worthy's own
+# track ends at 481; he runs on as sideline t88 (red, 485-527) and goes down under t2 (a Raven's track that left its
+# man for the red carrier at 536); the endzone's #1 (OCR) is his too. The ball stage's receiver (id 4) now carries the
+# ball to the down.   census 480-552 2.95 -> 2.81, live 1.98 -> 1.94; steps unchanged.
+# (Endzone frames in the plans are the endzone clip's own frame numbers, as in tracks.parquet.)
+"$PY" scripts/08zc_relabel_tracks.py --play-dir "$P" --plan plays/bal_at_kc_2024_wk1/play_006/plan_receiver.json --apply
+
+# --- batch 6: #53 Van Noy boxed three times at 362-372 (16, 94, 185 on one man on the film at 367); 185 a second
+# sideline track on him to 420.   census live 1.94 -> 1.87 (330-413 1.50 -> 1.31, 414-479 3.48 -> 3.33);
+# steps over 0.25 m 26 -> 10 (94's hops were the triple).
+"$PY" scripts/08zc_relabel_tracks.py --play-dir "$P" --plan plays/bal_at_kc_2024_wk1/play_006/plan_van_noy.json --apply

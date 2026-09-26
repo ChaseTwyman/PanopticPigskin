@@ -13,7 +13,9 @@ The footage is not included: the pipeline expects `data/all22/bal_at_kc_2024_wk1
 |---|---|
 | `events.json` | all six ball events off the film: the snap (256), the passer (id 8, #15), the release (378), the catch (414, the ball into the carrier's hands in the endzone film), the receiver (id 4, #1 on the sideline film), the down (552) |
 
-No identity fixes and no film-read depths yet: this is the pipeline's own result.
+Identity fixes: `identity_fixes.sh` (six batches, each with its plan file and its measurement; RESULTS.md has
+the before and after). Run it once on a play folder fresh out of the pipeline, then re-run the ball stage, the
+renders and the exports (docs/RUNBOOK.md step 6). No film-read depths yet.
 
 ## Running it
 

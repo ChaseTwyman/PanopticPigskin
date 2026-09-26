@@ -47,10 +47,33 @@ ball finder's cubic search (hand-read `RELEASE`/`CATCH`/`RECEIVER`); the ball st
 08x writes it; the fine-tune's weights landing under `runs/`; and the fine-tune dying at the machine's commit limit
 (`--resume`).
 
-## To get it looking good
+## After the identity pass
 
-The identity recipe used on play 1 (film strips with ids, folds and drops per camera track; its census went 0.94 →
-0.18 in one night of it, and to 0.00 with later fixes):
-fold Worthy's four ids; settle id 7 and the other kit-overruled ids on the film; drop the twins; recover the KC
-bodies lost after the throw. Then a film-read depth wherever a man is hidden, and the renders checked against the
-broadcast (`05k --view-camera sideline`).
+Six batches (`identity_fixes.sh`, docs/RUNBOOK.md step 5), each measured on a copy of the play folder first; replayed
+on the play folder they reproduce the copy's numbers exactly.
+
+| stretch | pipeline only | after the pass | KC / BAL drawn after |
+|---|---|---|---|
+| snap to throw (256–329) | 3.23 | **0.27** (57 of 74 frames exactly 11 v 11) | 11.1 / 11.0 |
+| pocket (330–413) | 4.73 | **1.31** | 10.7 / 10.6 |
+| after the catch (414–479) | 5.62 | 3.33 | 8.2 / 11.2 |
+| run to the tackle (480–552) | 4.73 | 2.81 | 8.9 / 11.1 |
+| live play | 4.55 | **1.87** | |
+| steps over 0.25 m (live) | 29 | **10** | |
+
+1. The formation, read off the endzone film's backs before the snap: the centre #52 (read #92, made a defensive
+   tackle, so the loader found no centre), a tight end labelled BAL, the right tackle #74, the left guard #62,
+   Worthy #1 (given a tight end's build).
+2. The offensive line by `tools/film/line_matcher.py`: the centre's and the left guard's sideline tracks had traded.
+3. The tight end and the two Ravens on him, by each box's kit colour: three tracks passed him between them.
+4. The left side: the guard held twice at the snap and later under ids labelled BAL; the left tackle's continuation;
+   a second track on Raven 20.
+5. The ball carrier: Worthy's chain after the catch (his own track ends at 481), so the ball stays with him to the
+   down.
+6. Van Noy (#53) boxed three times at 362–372.
+
+What is left. After the catch the broadcast cameras follow Worthy to the far sideline and the pocket leaves both
+views: the Chiefs' linemen are drawn while a camera sees them, not to the whistle. The census after 414 counts them
+missing; the sideline shows 3–6 red boxes a frame there (and more whose kit it cannot read). In the pocket (330–413) a few chains are still open: the centre's second
+sideline track (t25 after 283) is his only drawn copy on some frames, and Raven 13 has a second track (49) at
+377–465.

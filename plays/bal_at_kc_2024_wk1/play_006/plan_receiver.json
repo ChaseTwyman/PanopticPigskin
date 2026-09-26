@@ -1,0 +1,32 @@
+[
+ {
+  "cam": "sideline",
+  "track_id": 88,
+  "frames": [
+   485,
+   527
+  ],
+  "id": 4,
+  "why": "Worthy after the catch: red, on from t4 (479, -27.4, 12.2) to (-27.7, 16.0); #1 on the film at 490-520"
+ },
+ {
+  "cam": "sideline",
+  "track_id": 2,
+  "frames": [
+   536,
+   548
+  ],
+  "id": 4,
+  "why": "Worthy going down: t2 left its Raven for the red carrier at 536 (red 539-545; film 545)"
+ },
+ {
+  "cam": "endzone",
+  "track_id": 145,
+  "frames": [
+   485,
+   532
+  ],
+  "id": 4,
+  "why": "the endzone's #1 (OCR, named Xavier Worthy) after the catch"
+ }
+]
