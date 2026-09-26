@@ -31,6 +31,38 @@ from nfl_gsplat.calibration.cameras_io import load_camera_track, write_camera_tr
 from nfl_gsplat.errors import CalibrationError
 
 
+def feet_in_view(side, ez, tdf: pd.DataFrame, *, stride: int = 4, tol_px: float = 150.0) -> float:
+    """Median over frames of how many sideline feet, placed on the turf through ``side`` and projected through
+    ``ez``, land within ``tol_px`` of an endzone box's feet on the same frame index (offset 0: the clip offset is
+    not measured yet; a few frames of drift cost a little, a camera on the wrong yard lines costs everything).
+    The tolerance is wide on purpose: the sideline's blind axis (depth, across the field; ~1 m) is the endzone's
+    lateral axis, ~130 px at play 1's zoom, so a correct camera lands feet 80-150 px from their boxes."""
+    from nfl_gsplat.calibration.from_players import ground_points
+
+    counts = []
+    n = min(len(side.conf), len(ez.conf))
+    both = np.flatnonzero((side.conf[:n] > 0) & (ez.conf[:n] > 0))
+    s_by = dict(tuple(tdf[tdf["cam"] == "sideline"].groupby("frame")))
+    e_by = dict(tuple(tdf[tdf["cam"] == "endzone"].groupby("frame")))
+    for f in both[::stride]:
+        if f not in s_by or f not in e_by:
+            continue
+        g = ground_points((side.K[f], side.R[f], side.t[f]), s_by[f][["foot_u", "foot_v"]].to_numpy(float))
+        g = g[np.isfinite(g).all(1)]
+        if not len(g):
+            continue
+        g = np.column_stack([g[:, :2], np.zeros(len(g))])     # turf points (x, y, 0)
+        x = (ez.K[f] @ (ez.R[f] @ g.T + ez.t[f].reshape(3, 1))).T
+        uv = x[:, :2] / x[:, 2:3]
+        feet = e_by[f][["foot_u", "foot_v"]].to_numpy(float)
+        feet = feet[np.isfinite(feet).all(1)]
+        if not len(feet):
+            continue
+        d = np.linalg.norm(uv[:, None, :] - feet[None, :, :], axis=2).min(axis=1)
+        counts.append(int(((d <= tol_px) & (x[:, 2] > 0)).sum()))
+    return float(np.median(counts)) if counts else float("nan")
+
+
 def boxes_by_frame(tracks_df: pd.DataFrame, cam: str) -> dict:
     out: dict = {}
     sub = tracks_df[tracks_df["cam"] == cam]
@@ -75,6 +107,7 @@ def main() -> None:
     # the players: independent of the paint
     kp = P / "keypoints_2d.parquet"
     verdict = None
+    r0 = r1 = None
     if kp.exists():
         offset = args.offset
         if offset is None:
@@ -85,6 +118,7 @@ def main() -> None:
         other = tracks[args.other]
         r0 = ep.player_rulers(other, track, kdf, offset=offset, stride=args.ruler_stride)
         r1 = ep.player_rulers(other, refined, kdf, offset=offset, stride=args.ruler_stride)
+    if r1 is not None and len(r1["frames"]):
         m0, m1 = np.nanmedian(r0["miss_p50"]), np.nanmedian(r1["miss_p50"])
         a0, a1 = np.nanmedian(r0["ankle_z"]), np.nanmedian(r1["ankle_z"])
         h0, h1 = np.nanmedian(r0["hip_z"]), np.nanmedian(r1["hip_z"])
@@ -96,7 +130,18 @@ def main() -> None:
             raise CalibrationError("the players do not confirm the refinement (the ray miss did not drop or the ankles "
                                    "did not come down to the turf); cameras untouched")
     else:
-        print("no keypoints_2d.parquet: the players cannot judge this refinement; writing on the paint alone")
+        # No keypoints yet (the pipeline runs 08l before 05m), or none on ids both cameras share: the boxes judge
+        # instead. The paint alone cannot:
+        # yard lines repeat every 5 yards, and play 6's endzone, moved to a held centre without re-aiming, fitted
+        # the lines 44 m up the field at 6.7 px while no sideline player projected into its image.
+        n0 = feet_in_view(tracks[args.other], track, tdf)
+        n1 = feet_in_view(tracks[args.other], refined, tdf)
+        print(f"players (boxes; no keypoints yet): sideline feet landing on an endzone box's feet, median per frame "
+              f"{n0:.0f} -> {n1:.0f}")
+        if n0 >= 3 and n1 < 0.5 * n0:
+            raise CalibrationError(f"the refined endzone camera loses the players ({n0:.0f} -> {n1:.0f} sideline feet "
+                                   "on endzone boxes per frame): the paint fit registered the wrong yard lines; "
+                                   "cameras untouched")
 
     tracks[args.cam] = refined
     fps = float(np.load(P / "cameras.npz", allow_pickle=True)["fps"])

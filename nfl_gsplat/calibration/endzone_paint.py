@@ -546,6 +546,33 @@ def player_rulers(track_a, track_b, keypoints, *, offset: int = 0, min_conf: flo
     return {kk: np.asarray(v) for kk, v in out.items()}
 
 
+def reaim_track(track, centre, frames):
+    """The track with every frame's camera moved to ``centre`` and still looking at the turf point its principal
+    ray hit, the focal scaled by the distance ratio so the image keeps its scale there. A held centre must start
+    from this: moving play 6's endzone from 60 m to 88 m out WITHOUT re-aiming left every frame looking ~44 m up
+    the field, and the paint fit locked onto the yard lines there (they repeat every 5 yards) at 6.7 px."""
+    from nfl_gsplat.calibration.cameras_io import CameraTrack
+
+    centre = np.asarray(centre, float)
+    K, R, t = track.K.copy(), track.R.copy(), track.t.copy()
+    for f in frames:
+        C0 = -R[f].T @ t[f]
+        fwd = R[f][2]                                  # the camera's z axis in the world
+        if fwd[2] >= -1e-6:
+            continue                                   # at or above the horizon: no turf point to keep
+        dist0 = -C0[2] / fwd[2]
+        ground = C0 + dist0 * fwd
+        to = ground - centre
+        dist1 = float(np.linalg.norm(to))
+        Q = Rotation.align_vectors(to[None] / dist1, fwd[None])[0].as_matrix()
+        R[f] = R[f] @ Q.T
+        K[f] = K[f].copy()
+        K[f][0, 0] *= dist1 / dist0
+        K[f][1, 1] *= dist1 / dist0
+        t[f] = -R[f] @ centre
+    return CameraTrack(K=K, R=R, t=t, conf=track.conf.copy(), width=track.width, height=track.height)
+
+
 def refine_track(video_path, track, boxes_by_frame, *, frames=None, centre_frames: int = 12,
                  centre=None, log_every: int = 100):
     """The endzone camera track refined to its paint: the centre solved once over
@@ -571,6 +598,7 @@ def refine_track(video_path, track, boxes_by_frame, *, frames=None, centre_frame
 
     # --- the centre, from frames that show the goal line; frames the joint fit cannot
     # bring onto the paint (a mis-registered pan frame) are dropped and it is refitted
+    held = centre is not None
     seeds: dict = {}                                   # frame -> (K, R) solved with the centre
     if centre is None:
         cands = [int(x) for x in np.linspace(all_frames[0], all_frames[-1], centre_frames * 3)]
@@ -612,6 +640,8 @@ def refine_track(video_path, track, boxes_by_frame, *, frames=None, centre_frame
                 K, R, _t = camera_from(per[i], K0s[i], R0s[i], centre)
                 seeds[f] = (K, R)
     centre = np.asarray(centre, float)
+    if held:
+        track = reaim_track(track, centre, all_frames)
 
     # --- per frame, outward from the seeded frames so the registration never travels far:
     # each frame starts from the nearest already-solved camera
