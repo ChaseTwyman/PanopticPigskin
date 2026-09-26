@@ -43,7 +43,7 @@ jobs:
 
       - name: Run CPU test suite
         run: |
-          pytest -m "not gpu and not slow and not real_video" \
+          pytest -m "not gpu and not slow and not real_video" -n auto \
             --junitxml=pytest.xml -ra -v
 
       - name: Upload test results
