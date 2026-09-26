@@ -1,0 +1,502 @@
+"""SMPLest-X-H32 per-camera per-frame inference.
+
+Lazy torch / SMPLest-X import so this module is safe to import from CPU envs
+(tests, tracking). Real inference requires the smplx environment (SETUP.md §1) plus
+the SMPLest-X repo checkout + pretrained weights.
+
+Output cache schema (one NPZ per ``(cam, frame, global_player_id)``)::
+
+    betas           [10]
+    body_pose       [21, 3]       axis-angle per body joint
+    global_orient   [3]
+    transl          [3]
+    joints3d_cam    [J, 3]        SMPL-X all-joints in camera coords
+    joints2d        [J, 2]        pixel coords in the *original frame*
+                                  FIXED 2026-08-27. Was broken: joints
+                                  landed nowhere near their players because
+                                  smplx_joint_proj is in OUTPUT HEATMAP units
+                                  (output_hm_shape, here (16, 16, 12)), not
+                                  patch pixels, and the old code treated any
+                                  value above 1.5 as pixels already. Now
+                                  projected through a bbox-derived camera the
+                                  way SMPLest-X's own main/inference.py does.
+                                  Measured after: 94% of joints land inside
+                                  their own detection box (median), min 62%.
+
+RESOLVED 2026-08-26 -- the strict=False checkpoint-load warning is BENIGN.
+Diffed the checkpoint against the model: 519 checkpoint tensors, 0 unexpected,
+and all 17 "missing" keys are smplx_layer.* body-model CONSTANTS
+(J_regressor, shapedirs, lbs_weights, faces_tensor, parents, ...) supplied by
+the SMPL-X model files at construction rather than carried in the checkpoint.
+Verified they are populated, not empty: shapedirs (10475, 3, 10) absmean
+2.47e-03, J_regressor (55, 10475) absmean 9.55e-05.
+
+The consequence matters more than the finding: betas coming back near zero is
+therefore NOT a loading bug. The network genuinely regresses near-neutral shape
+from 60-180 px crops, so per-player body size cannot be recovered per frame and
+has to come from elsewhere -- aggregation over a track, roster stature, or
+multi-view fitting.
+    confidence      [J]           see note below
+
+Only the first 22 joints are used by triangulation; the rest (hands/face)
+are cached for future use. ``J`` is whatever the loaded SMPLest-X model
+regresses (read from the model output, not hard-coded).
+
+CONFIDENCE NOTE: SMPLest-X is a *regressor* — it emits SMPL-X parameters and
+re-projected joints directly, with no per-joint heatmap confidence. We
+therefore synthesize ``confidence = 1.0`` for every joint. Downstream
+triangulation/fusion weights views by this confidence, so all views from
+SMPLest-X are weighted equally (we cannot down-weight occluded joints from
+SMPLest-X alone). If per-joint reliability is needed later, derive it from the
+detector/track confidence and inject it here.
+
+The real model glue (``_load_smplestx_model`` / ``_smplestx_forward``) mirrors
+``third_party/SMPLest-X/main/inference.py`` (Config → Tester → model forward).
+Both are monkeypatched in the CPU contract test so the schema assembly is
+exercised without torch or weights.
+"""
+from __future__ import annotations
+
+import contextlib
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+
+from nfl_gsplat.errors import SetupError
+from nfl_gsplat.utils.logging import get_logger
+
+_LOG = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class SMPLestXConfig:
+    repo_dir: Path = Path("third_party/SMPLest-X")
+    # The HF release lays weights + config out as
+    #   pretrained_models/<ckpt_name>/<ckpt_name>.pth.tar
+    #   pretrained_models/<ckpt_name>/config_base.py
+    ckpt_name: str = "smplest_x_h"
+    device: str = "cuda:0"
+    batch_size: int = 4
+
+    @property
+    def model_dir(self) -> Path:
+        return self.repo_dir / "pretrained_models" / self.ckpt_name
+
+    @property
+    def weights_path(self) -> Path:
+        return self.model_dir / f"{self.ckpt_name}.pth.tar"
+
+    @property
+    def config_path(self) -> Path:
+        return self.model_dir / "config_base.py"
+
+
+def _lazy_import():
+    try:
+        import torch  # type: ignore
+    except ImportError as e:
+        raise SetupError(
+            "torch not installed — run this in the smplx environment "
+            "(PY_SMPLX). See SETUP.md §1."
+        ) from e
+    return torch
+
+
+def check_prerequisites(cfg: SMPLestXConfig) -> None:
+    """Raise :class:`SetupError` if model code, weights, or config are missing.
+
+    Run this once at pipeline start so the failure mode is immediate and the
+    error message names the exact missing path (per project error philosophy).
+    """
+    if not cfg.repo_dir.exists():
+        raise SetupError(
+            f"SMPLest-X repo not checked out at {cfg.repo_dir}. "
+            "Run scripts/01_download_models.sh — see SETUP.md §4."
+        )
+    if not cfg.weights_path.exists():
+        raise SetupError(
+            f"SMPLest-X weights missing at {cfg.weights_path}. "
+            "Download the pretrained model into pretrained_models/"
+            f"{cfg.ckpt_name}/ — see SETUP.md §4."
+        )
+    if not cfg.config_path.exists():
+        raise SetupError(
+            f"SMPLest-X config missing at {cfg.config_path}. It ships with the "
+            "pretrained-model release alongside the .pth.tar — see SETUP.md §4."
+        )
+
+
+_MODEL_CACHE: dict = {}
+
+# Default body-joint counts (the root pose is global_orient, excluded from
+# body_pose). J (total regressed joints) is read from the model output.
+NUM_SMPLX_JOINTS = 127           # documented default; assembly uses the real J
+NUM_BODY_POSE_JOINTS = 21        # body_pose excludes the root (global_orient)
+
+
+@contextlib.contextmanager
+def _chdir(path: Path):
+    """Temporarily chdir — SMPLest-X's config/human-model paths are repo-relative."""
+    prev = os.getcwd()
+    os.chdir(str(path))
+    try:
+        yield
+    finally:
+        os.chdir(prev)
+
+
+def _load_smplestx_model(cfg: SMPLestXConfig):
+    """Load + cache the SMPLest-X model (env-gated: the smplx environment).
+
+    Mirrors ``third_party/SMPLest-X/main/inference.py``: load the bundled
+    ``config_base.py``, point it at the checkpoint, build a ``Tester`` and call
+    ``_make_model`` (which loads weights + ``.eval()``). The repo resolves
+    ``./pretrained_models`` and human-model files relative to its own root, so
+    the build runs with the cwd set to ``repo_dir``.
+    """
+    key = str(cfg.repo_dir)
+    if key in _MODEL_CACHE:
+        return _MODEL_CACHE[key]
+    _lazy_import()
+    import sys
+    import tempfile
+
+    repo = cfg.repo_dir.resolve()
+    sys.path.insert(0, str(repo))
+    try:
+        from main.base import Tester          # type: ignore
+        from main.config import Config        # type: ignore
+    except Exception as e:  # noqa: BLE001 — surface a setup-actionable message
+        raise SetupError(
+            f"could not import SMPLest-X (main.config / main.base) from {repo} "
+            f"({e}). Confirm the checkout — see SETUP.md §8."
+        ) from e
+
+    log_dir = Path(tempfile.mkdtemp(prefix="smplestx_log_"))
+    # Resolve OUTSIDE the chdir. config_path is relative to the project root and
+    # SMPLest-X opens it relative to CWD, so resolving once inside the context
+    # would just re-anchor it on the repo and yield
+    # third_party/SMPLest-X/third_party/SMPLest-X/... -- a path that looks almost
+    # right in the traceback. Path.resolve() is cwd-dependent; that is the trap.
+    config_abs = str(cfg.config_path.resolve())
+    weights_abs = str(cfg.weights_path.resolve())
+    with _chdir(repo):
+        smplestx_cfg = Config.load_config(config_abs)
+        smplestx_cfg.update_config({
+            "model": {"pretrained_model_path": weights_abs},
+            "log": {"exp_name": "nfl_infer", "log_dir": str(log_dir)},
+        })
+        smplestx_cfg.prepare_log()
+        # Prime the SMPLX singleton before the model is built. SMPLest-X's own
+        # entry points (main/inference.py, test.py, train.py) all do this first;
+        # models/module.py then calls a bare SMPLX() and relies on the instance
+        # already existing. Skipping it fails deep inside graph construction
+        # with "SMPLX requires human model path", which reads like a missing
+        # file rather than an initialisation-order problem.
+        from human_models.human_models import SMPLX as _SMPLXSingleton
+        _SMPLXSingleton(smplestx_cfg.model.human_model_path)
+        tester = Tester(smplestx_cfg)
+        tester._make_model()      # builds DataParallel model, loads ckpt, .eval()
+
+    verify_checkpoint_coverage(tester.model, weights_abs)
+    model = _SMPLestXRunner(tester, smplestx_cfg)
+    _MODEL_CACHE[key] = model
+    return model
+
+
+# The SMPL-X layer's buffers are CONSTANTS of the body model -- the template
+# mesh, the shape and pose blend shapes, the joint regressor, the skinning
+# weights -- read from SMPLX_NEUTRAL.npz when the layer is constructed. They are
+# deliberately not shipped inside a training checkpoint, so they are the
+# expected and harmless residue of loading with strict=False.
+_BODY_MODEL_CONSTANT_PREFIX = "smplx_layer."
+
+
+def strip_data_parallel(key: str) -> str:
+    """Drop the ``module.`` prefix DataParallel adds to every parameter name.
+
+    Both sides need this, and getting it wrong is not a subtle failure: taking
+    it off only the checkpoint reported all 536 tensors as missing, which reads
+    as a catastrophically broken load and is purely a naming artefact.
+    """
+    return key[len("module."):] if key.startswith("module.") else key
+
+
+def checkpoint_coverage(model, weights_path):
+    """``(missing, unexpected, mismatched)`` between a checkpoint and a model.
+
+    ``missing`` excludes the body-model constants, which no checkpoint carries.
+    """
+    import torch
+
+    blob = torch.load(weights_path, map_location="cpu", weights_only=False)
+    state = blob.get("network", blob.get("state_dict", blob))
+    ckpt = {strip_data_parallel(k): v for k, v in state.items()}
+    own = {strip_data_parallel(k): v for k, v in model.state_dict().items()}
+
+    missing = sorted(k for k in own if k not in ckpt
+                     and not k.startswith(_BODY_MODEL_CONSTANT_PREFIX))
+    unexpected = sorted(k for k in ckpt if k not in own)
+    mismatched = sorted(k for k in own if k in ckpt
+                        and tuple(own[k].shape) != tuple(ckpt[k].shape))
+    return missing, unexpected, mismatched
+
+
+def verify_checkpoint_coverage(model, weights_path) -> None:
+    """Fail loudly if any LEARNED parameter did not come from the checkpoint.
+
+    SMPLest-X loads with ``strict=False`` and prints "Please check manually" on
+    every run. That warning cannot distinguish a fully loaded network from one
+    missing half its encoder, and a partially loaded network still returns
+    plausible-looking poses -- which is exactly the failure that would go
+    unnoticed. Measured on smplest_x_h: all 519 checkpoint tensors match, with
+    0 unexpected and 0 shape mismatches; the only 17 unmatched entries are the
+    body-model constants above. So the check is cheap and the expected answer
+    is clean, which makes it worth enforcing rather than re-verifying by hand
+    whenever the checkpoint changes.
+    """
+    missing, unexpected, mismatched = checkpoint_coverage(model, weights_path)
+    if not (missing or unexpected or mismatched):
+        _LOG.info("SMPLest-X checkpoint: every learned parameter loaded "
+                  "(strict=False residue is body-model constants only)")
+        return
+    parts = []
+    if missing:
+        parts.append(f"{len(missing)} parameter(s) absent from the checkpoint "
+                     f"(e.g. {missing[:3]})")
+    if mismatched:
+        parts.append(f"{len(mismatched)} shape mismatch(es) "
+                     f"(e.g. {mismatched[:3]})")
+    if unexpected:
+        parts.append(f"{len(unexpected)} checkpoint tensor(s) the model has no "
+                     f"slot for (e.g. {unexpected[:3]})")
+    raise SetupError(
+        "SMPLest-X checkpoint does not match the model: " + "; ".join(parts)
+        + f". Weights: {weights_path}. The network would run and return "
+        "plausible-looking poses regardless, so this is checked rather than "
+        "trusted. Confirm the checkpoint matches the config in "
+        "pretrained_models/<ckpt>/config_base.py.")
+
+
+class _SMPLestXRunner:
+    """Thin holder bundling the Tester, its cfg, and the input patch shape.
+
+    Keeps everything ``_smplestx_forward`` needs in one place and matches the
+    object the contract test monkeypatches in for ``_load_smplestx_model``.
+    """
+
+    def __init__(self, tester, smplestx_cfg):
+        self.tester = tester
+        self.cfg = smplestx_cfg
+        # input_img_shape is (H, W) of the network patch, e.g. (512, 384).
+        self.input_img_shape = tuple(smplestx_cfg.model.input_img_shape)
+        self.bbox_ratio = getattr(getattr(smplestx_cfg, "data", None), "bbox_ratio", 1.25)
+
+
+def _apply_affine(pts_xy: np.ndarray, trans_2x3: np.ndarray) -> np.ndarray:
+    """Apply a 2x3 affine to [N, 2] points. Used to map patch-space joint
+    projections back to the source-crop pixel frame via ``inv_trans``."""
+    pts = np.asarray(pts_xy, dtype=np.float64)
+    homog = np.concatenate([pts, np.ones((pts.shape[0], 1))], axis=1)   # [N, 3]
+    return (homog @ np.asarray(trans_2x3, dtype=np.float64).T).astype(np.float32)
+
+
+def _smplestx_forward(model, crops: np.ndarray, bboxes: np.ndarray,
+                      cfg: SMPLestXConfig) -> list[dict[str, np.ndarray]]:
+    """Run the model on crops → one raw param dict per sample.
+
+    Each crop is treated as its own image: we re-derive the network patch with
+    the repo's ``process_bbox`` + ``generate_patch_image`` (so inputs match the
+    training distribution), run the forward in ``'test'`` mode, then map the
+    re-projected joints from patch space back to the *original frame* using the
+    patch ``inv_trans`` plus the crop's offset in ``bboxes`` (x1, y1).
+
+    Seam: monkeypatched in tests so the schema assembly runs without torch.
+    """
+    torch = _lazy_import()
+    import sys
+    import torchvision.transforms as T  # type: ignore
+
+    sys.path.insert(0, str(cfg.repo_dir.resolve()))
+    from utils.data_utils import generate_patch_image, process_bbox  # type: ignore
+
+    runner: _SMPLestXRunner = model
+    net = runner.tester.model
+    in_h, in_w = runner.input_img_shape
+    to_tensor = T.ToTensor()
+
+    results: list[dict[str, np.ndarray]] = []
+    for start in range(0, len(crops), cfg.batch_size):
+        batch_crops = crops[start:start + cfg.batch_size]
+        batch_boxes = bboxes[start:start + cfg.batch_size]
+
+        patches = []
+        inv_transes = []
+        pboxes = []
+        smplx_body_shape = tuple(model.cfg.model.input_body_shape)
+        focal_cfg = tuple(model.cfg.model.focal)
+        princpt_cfg = tuple(model.cfg.model.princpt)
+        for crop in batch_crops:
+            h, w = crop.shape[:2]
+            full_box = np.array([0.0, 0.0, w, h], dtype=np.float32)  # xywh of whole crop
+            pbox = process_bbox(full_box, w, h, runner.input_img_shape,
+                                ratio=runner.bbox_ratio)
+            patch, _trans, inv_trans = generate_patch_image(
+                cvimg=crop, bbox=pbox, scale=1.0, rot=0.0, do_flip=False,
+                out_shape=runner.input_img_shape,
+            )
+            patches.append(to_tensor(patch.astype(np.float32)) / 255.0)
+            inv_transes.append(inv_trans)
+            pboxes.append(np.asarray(pbox, dtype=np.float64))
+
+        img = torch.stack(patches, dim=0).to(cfg.device)
+        with torch.no_grad():
+            out = net({"img": img}, {}, {}, "test")
+
+        root_pose = out["smplx_root_pose"].detach().cpu().numpy()
+        body_pose = out["smplx_body_pose"].detach().cpu().numpy()
+        shape = out["smplx_shape"].detach().cpu().numpy()
+        cam_trans = out["cam_trans"].detach().cpu().numpy()
+        # smplx_joint_proj is deliberately NOT read: it comes back in output
+        # HEATMAP units, and unwinding it through inv_trans is the wrong route
+        # this code once took (see the note below). Keeping it bound invited
+        # someone to reuse it.
+        joint_cam = out["smplx_joint_cam"].detach().cpu().numpy()
+
+        for i in range(len(batch_crops)):
+            n_joints = joint_cam[i].shape[0]
+            # joint_proj is in network-patch pixels; inv_trans -> crop pixels,
+            # then add the crop's top-left in the full frame.
+            # Project the 3D joints through a camera derived from the bbox,
+            # exactly as SMPLest-X's own main/inference.py does. The earlier
+            # route -- unwind smplx_joint_proj through inv_trans -- was wrong:
+            # joint_proj is in OUTPUT HEATMAP units (output_hm_shape, here
+            # (16, 16, 12)), not patch pixels, and the code treated any value
+            # above 1.5 as already being pixels. Joints landed nowhere near
+            # their players.
+            box = pboxes[i]                       # (x, y, w, h) in CROP pixels
+            body_h, body_w = smplx_body_shape
+            fx = focal_cfg[0] / body_w * box[2]
+            fy = focal_cfg[1] / body_h * box[3]
+            cx = princpt_cfg[0] / body_w * box[2] + box[0]
+            cy = princpt_cfg[1] / body_h * box[3] + box[1]
+            # smplx_joint_cam comes back in SMPL-X's own Y-UP frame while the
+            # pinhole projection below is Y-DOWN like every image, so the JOINTS
+            # are flipped. cam_trans is already in the image convention and must
+            # NOT be: negating the sum moves the whole skeleton off the player.
+            #
+            # Scored against cached outputs rather than reasoned about, by the
+            # fraction of joints landing inside their own detection box and the
+            # fraction of players whose head sits above their ankles:
+            #
+            #     flip          inside box   head up   vertical offset
+            #     none (shipped)      69.4%       0%     +0.21 box-heights
+            #     joints + transl     69.4%     100%     -0.21
+            #     joints only         97.0%     100%     +0.08
+            #
+            # Without the flip the 3D reconstruction built on these comes out
+            # inverted, with a stature of -1.4 m against a roster 1.83 m.
+            abs_cam = (joint_cam[i] * np.array([1.0, -1.0, 1.0])
+                       + cam_trans[i][None, :])
+            depth = np.where(np.abs(abs_cam[:, 2]) < 1e-6, 1e-6, abs_cam[:, 2])
+            crop_xy = np.stack([abs_cam[:, 0] / depth * fx + cx,
+                                abs_cam[:, 1] / depth * fy + cy], axis=1)
+            # crop_xy is in CROP pixels. Scale it back to the ORIGINAL box
+            # before adding the box's corner, because a caller is allowed to
+            # hand in a resized crop -- the signature takes crops and boxes
+            # separately and says nothing about them matching in size.
+            #
+            # Adding the corner directly is correct ONLY when the crop is the
+            # raw box pixels, and that unstated assumption produced a silent,
+            # expensive failure: 192x256 crops against a ~40x160 box put every
+            # skeleton up to 192 px right and 256 px below its player. Only 10%
+            # of joints landed inside their own box against the 94% this
+            # pipeline measures when it is right, and the 3D reconstruction
+            # came out UPSIDE DOWN while reprojection error and joint validity
+            # both still read healthy.
+            x1, y1, x2, y2 = (float(v) for v in batch_boxes[i][:4])
+            ch, cw = batch_crops[i].shape[:2]
+            sx = (x2 - x1) / max(cw, 1e-9)
+            sy = (y2 - y1) / max(ch, 1e-9)
+            joints2d = (crop_xy * np.array([sx, sy])
+                        + np.array([x1, y1])).astype(np.float32)
+            results.append({
+                "betas": shape[i][:10],
+                "body_pose": body_pose[i].reshape(NUM_BODY_POSE_JOINTS, 3),
+                "global_orient": root_pose[i].reshape(3),
+                "transl": cam_trans[i].reshape(3),
+                "joints3d_cam": joint_cam[i],
+                "joints2d": joints2d,
+                # Regressor has no per-joint confidence — see module docstring.
+                "confidence": np.ones(n_joints, dtype=np.float32),
+            })
+    return results
+
+
+def _assemble_smplestx_outputs(raw: list[dict[str, np.ndarray]]) -> dict[str, np.ndarray]:
+    """Stack per-sample raw dicts into the cache schema (leading ``N``). Pure.
+
+    The total joint count ``J`` is read from the samples rather than hard-coded,
+    so this works for whichever SMPLest-X variant produced ``raw``.
+    """
+    n = len(raw)
+    j = int(np.asarray(raw[0]["joints3d_cam"]).shape[0]) if n else NUM_SMPLX_JOINTS
+    out = {
+        "betas": np.zeros((n, 10), dtype=np.float32),
+        "body_pose": np.zeros((n, NUM_BODY_POSE_JOINTS, 3), dtype=np.float32),
+        "global_orient": np.zeros((n, 3), dtype=np.float32),
+        "transl": np.zeros((n, 3), dtype=np.float32),
+        "joints3d_cam": np.zeros((n, j, 3), dtype=np.float32),
+        "joints2d": np.zeros((n, j, 2), dtype=np.float32),
+        "confidence": np.zeros((n, j), dtype=np.float32),
+    }
+    for i, r in enumerate(raw):
+        out["betas"][i] = np.asarray(r["betas"], dtype=np.float32).reshape(10)
+        out["body_pose"][i] = np.asarray(r["body_pose"], dtype=np.float32).reshape(NUM_BODY_POSE_JOINTS, 3)
+        out["global_orient"][i] = np.asarray(r["global_orient"], dtype=np.float32).reshape(3)
+        out["transl"][i] = np.asarray(r["transl"], dtype=np.float32).reshape(3)
+        out["joints3d_cam"][i] = np.asarray(r["joints3d_cam"], dtype=np.float32)
+        out["joints2d"][i] = np.asarray(r["joints2d"], dtype=np.float32)
+        out["confidence"][i] = np.asarray(r["confidence"], dtype=np.float32)
+    return out
+
+
+def infer_crops(
+    crops: np.ndarray,       # [N, H, W, 3] uint8 RGB
+    bboxes: np.ndarray,      # [N, 4] image-space (x1, y1, x2, y2)
+    cfg: SMPLestXConfig,
+) -> dict[str, np.ndarray]:
+    """Run SMPLest-X-H32 on a batch of player crops.
+
+    ``bboxes`` carry each crop's location in the original frame; the re-projected
+    joints (``joints2d``) are returned in that original-frame pixel space.
+
+    Returns a dict of stacked per-sample outputs (shapes with leading ``N``),
+    matching the cache schema in this module's docstring. Heavy lifting is the
+    external SMPLest-X model loaded inside the smplx environment.
+    """
+    check_prerequisites(cfg)
+    model = _load_smplestx_model(cfg)
+    raw = _smplestx_forward(model, crops, bboxes, cfg)
+    return _assemble_smplestx_outputs(raw)
+
+
+def write_inference_cache(
+    out_dir: Path | str,
+    cam: str,
+    frame_idx: int,
+    global_player_id: int,
+    result: dict[str, np.ndarray],
+) -> Path:
+    """Write one NPZ per ``(cam, frame, global_player_id)``. Thin helper so
+    the main inference script calls this instead of open-coding atomic writes.
+    """
+    from nfl_gsplat.utils.io import write_npz
+
+    out_dir = Path(out_dir)
+    fname = f"{cam}__f{frame_idx:06d}__p{global_player_id:04d}.npz"
+    path = out_dir / fname
+    write_npz(path, **{k: np.asarray(v) for k, v in result.items()})
+    return path

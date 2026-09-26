@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+pytest.xml
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Data, footage, derived tables, renders: never committed. Broadcast footage is not ours to redistribute, and every
+# table under a play folder is derived from it. Only the repo-root folder (the package has its own modules).
+/data/
+/outputs/
+/kp_eval/
+
+# Model weights (scripts/01_download_models.sh; the SMPL-X files are licence-gated) and external checkouts
+*.pt
+*.pth
+*.pth.tar
+*.ckpt
+*.safetensors
+/third_party/
+*.aria2
+*.part
+
+# Test fixture renders (regenerated on demand)
+tests/fixtures/generated/
+
+# The demo site's build output and dependencies
+site/node_modules/
+site/dist/

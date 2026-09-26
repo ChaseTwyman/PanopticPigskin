@@ -1,0 +1,1367 @@
+"""Every player every frame, upright, interpolated (render.timeline)."""
+import numpy as np
+from scipy.spatial.transform import Rotation
+
+from nfl_gsplat.render import timeline as tl
+
+
+def test_upright_from_yaw_faces_the_yaw_and_stands_up():
+    for yaw in (0.0, 1.0, -2.0):
+        go = tl.upright_from_yaw(yaw)
+        assert tl.tilt_deg(go) < 1e-6
+        assert abs(((tl.yaw_of(go) - yaw) + np.pi) % (2 * np.pi) - np.pi) < 1e-6
+
+
+def test_clamp_tilt_keeps_yaw_and_limits_tilt():
+    yaw = 0.7
+    go = tl.upright_from_yaw(yaw)
+    # tip the body 70 degrees forward about a horizontal axis
+    axis = np.cross(tl.body_up(go), tl.UP)
+    tipped = (Rotation.from_rotvec(-axis / np.linalg.norm(axis) * np.radians(70)) *
+              Rotation.from_rotvec(go)).as_rotvec()
+    assert abs(tl.tilt_deg(tipped) - 70) < 1e-6
+    out, clamped = tl.clamp_tilt(tipped, 35.0)
+    assert clamped and abs(tl.tilt_deg(out) - 35.0) < 1e-6
+    assert abs(((tl.yaw_of(out) - yaw) + np.pi) % (2 * np.pi) - np.pi) < 0.2
+    same, c2 = tl.clamp_tilt(go, 35.0)
+    assert not c2 and np.allclose(same, go)
+
+
+def test_interp_axis_angle_slerps_between_posed_frames():
+    a = np.zeros((21, 3))
+    b = np.zeros((21, 3))
+    b[3] = [0.0, 0.0, 1.0]                      # one joint turns one radian
+    out = tl.interp_axis_angle([0, 10], [a, b], [0, 5, 10, 20])
+    assert np.allclose(out[0], a) and np.allclose(out[2], b) and np.allclose(out[3], b)
+    assert abs(np.linalg.norm(out[1][3]) - 0.5) < 1e-6
+
+
+def test_fill_gaps_and_smooth():
+    frames = list(range(10))
+    xy = np.array([[i, 0.0] for i in frames], float)
+    xy[3:6] = np.nan
+    filled = tl.fill_gaps(frames, xy, max_gap=5)
+    assert np.allclose(filled[:, 0], np.arange(10))
+    xy[3:6] = np.nan
+    unfilled = tl.fill_gaps(frames, xy, max_gap=1)
+    assert np.isnan(unfilled[4]).all()
+    sm = tl.smooth_xy(filled, window=3)
+    assert np.allclose(sm[:, 0], np.arange(10), atol=0.5)
+
+
+def test_yaw_from_motion_follows_travel_and_holds_when_still():
+    xy = np.array([[i * 0.5, 0.0] for i in range(20)] + [[9.5, 0.0]] * 10, float)
+    yaw = tl.yaw_from_motion(xy, window=4)
+    assert abs(yaw[5]) < 1e-6                   # moving +x
+    assert abs(yaw[-1]) < 1e-6                  # still: last heading held
+
+
+def test_build_timeline_gives_every_player_a_body_every_frame():
+    frames = list(range(0, 60))
+    ground = {f: {1: np.array([f * 0.1, 1.0]), 2: np.array([0.0, 6.0 + f * 0.05])} for f in frames}
+    for f in range(20, 25):                      # player 2 undetected briefly
+        del ground[f][2]
+    tipped = (Rotation.from_euler("x", 75, degrees=True) *              # past the two-view limit
+              Rotation.from_rotvec(tl.upright_from_yaw(0.0))).as_rotvec()
+    poses = {1: {0: (np.zeros((21, 3)), tl.upright_from_yaw(0.0), np.zeros(10), "fused"),
+                 30: (np.ones((21, 3)) * 0.2, tipped, np.zeros(10), "fused")}}
+    # both smoothers off: this checks the interpolation, and the Gaussian's held edge dips a
+    # ramp's last frame by a few percent, which is its job and not this test's question
+    out = tl.build_timeline(frames, ground, poses, default_pose=np.ones((21, 3)) * 0.1, pose_smooth=0, pose_sigma=0,
+                            clamp_joints=False, orient_sigma=0)          # 0.2 rad on every axis is a -11 deg elbow: the clamp would move it
+    assert all(len(out.states[f]) == 2 for f in frames), "both players every frame"
+    s1 = {f: [s for s in out.states[f] if s.pid == 1][0] for f in frames}
+    s2 = {f: [s for s in out.states[f] if s.pid == 2][0] for f in frames}
+    assert abs(np.linalg.norm(s1[15].body_pose) - 0.5 * np.linalg.norm(s1[30].body_pose)) < 1e-3
+    assert all(tl.tilt_deg(s1[f].global_orient) <= tl.MAX_TILT_TWO_VIEW_DEG + 1e-6 for f in frames)
+    assert out.n_clamped > 0
+    assert s2[22].source == "default" and np.isfinite(s2[22].xy).all()
+    assert abs(tl.yaw_of(s2[40].global_orient) - np.pi / 2) < 0.2    # travelling +y
+
+
+def test_dedupe_keeps_the_posed_body_of_two_ids_on_one_spot():
+    frames = list(range(0, 20))
+    ground = {f: {1: np.array([1.0, 1.0]), 2: np.array([1.3, 1.2]), 3: np.array([8.0, 0.0])}
+              for f in frames}
+    poses = {2: {0: (np.zeros((21, 3)), tl.upright_from_yaw(0.0), np.zeros(10), "fused")}}
+    out = tl.build_timeline(frames, ground, poses)
+    for f in frames:
+        pids = sorted(s.pid for s in out.states[f])
+        assert pids == [2, 3], pids                  # 1 (default-posed) dropped for 2 (fused)
+    assert out.n_duplicates == len(frames)
+
+
+def test_endzone_only_ids_along_their_depth_axis_are_duplicates_and_sideline_detections_never():
+    frames = list(range(0, 12))
+    ground = {f: {1: np.array([10.0, 2.0]), 2: np.array([13.0, 2.4]), 3: np.array([10.3, 5.5]),
+                  4: np.array([30.0, 0.0]), 5: np.array([10.0, 2.6])} for f in frames}
+    views = {f: {1: ("endzone", "sideline"), 2: ("endzone",), 3: ("sideline",), 4: ("endzone",),
+                 5: ("sideline",)} for f in frames}
+    out = tl.build_timeline(frames, ground, {}, views_by_frame=views)
+    for f in frames:
+        pids = sorted(s.pid for s in out.states[f])
+        # 2: endzone-only 3 m along x (its depth) from 1 -> the endzone's copy, dropped
+        # 3: sideline-seen 3.5 m along y from 1 -> a person the sideline detected, kept
+        # 4: far from everyone -> kept
+        # 5: sideline-seen 0.6 m from 1 (a lineman beside another) -> kept
+        assert pids == [1, 3, 4, 5], pids
+    assert out.n_duplicates == len(frames)
+
+
+def test_smooth_xy_never_averages_across_a_gap():
+    """Two stationary segments of one track, metres apart, separated by a gap fill_gaps will not bridge.
+
+    The old smoother compacted every finite row into one array before convolving, so the last window // 2
+    frames of the first segment were averaged with the first frames of the second: play 1's id 21 stood
+    still at (-27.1, -4.0) and was drawn marching 0.88 m/frame toward where its track resumed 77 frames
+    later (2026-09-15). Smoothing must stay inside each contiguous run.
+    """
+    xy = np.full((60, 2), np.nan)
+    xy[0:20] = [-27.1, -4.0]                  # segment A, stationary
+    xy[40:60] = [-20.0, +3.0]                 # segment B, stationary, 8 m away, after a 20-frame gap
+    out = tl.smooth_xy(xy, window=9)
+    assert np.allclose(out[0:20], [-27.1, -4.0]), out[15:20]      # A's tail is not pulled toward B
+    assert np.allclose(out[40:60], [-20.0, +3.0]), out[40:45]     # B's head is not pulled toward A
+    assert np.isnan(out[20:40]).all()                              # the gap stays a gap
+
+
+def test_the_endzone_copy_strung_along_its_depth_axis_stays_a_duplicate():
+    """The endzone's unreconciled copy of a player sits FAR along x (its blind depth axis) and near in y.
+
+    Play 2 is the case this guards: lowering ONE_VIEW_ACROSS_M to 1.0 readmitted 123 such states, |dx| to
+    the body they duplicate p50 2.87 m (id 2 on 53 frames at 3.46). Measured 2026-09-13, which is why that
+    change was reverted.
+
+    The open defect this does NOT cover: on play 1 the sideline merges linemen into one box, and the
+    endzone's separate detection of the next man stands |dx| 0.38-0.79 m with |dy| 1.19-1.30 -- beside him
+    at the same depth, a different player -- and the 1.5 m across radius deletes him too (id 74 on 65 of 65
+    frames). Distinguishing the two needs a depth-aware exception.
+    """
+    frames = list(range(0, 12))
+    ground = {f: {1: np.array([10.0, 2.0]), 2: np.array([12.9, 3.2])} for f in frames}
+    views = {f: {1: ("sideline",), 2: ("endzone",)} for f in frames}
+    out = tl.build_timeline(frames, ground, {}, views_by_frame=views)
+    for f in frames:
+        pids = sorted(s.pid for s in out.states[f])
+        assert pids == [1], (f, pids)       # 2.9 m along x, 1.2 m across: the endzone's own copy
+    assert out.n_duplicates == len(frames)
+
+
+def test_a_short_detection_gap_keeps_the_body_beside_its_neighbour():
+    frames = list(range(0, 12))
+    ground = {f: {1: np.array([10.0, 2.0]), 2: np.array([10.4, 2.3])} for f in frames}
+    for f in range(4, 8):                                  # id 2 undetected for four frames
+        del ground[f][2]
+    views = {f: {1: ("sideline",), **({2: ("sideline",)} if 2 in ground[f] else {})} for f in frames}
+    out = tl.build_timeline(frames, ground, {}, views_by_frame=views)
+    for f in frames:
+        pids = sorted(s.pid for s in out.states[f])
+        assert pids == [1, 2], (f, pids)                   # the sideline saw 2 within the gap: a person, kept
+    assert out.n_duplicates == 0
+
+
+def test_an_interpolated_fragment_on_top_of_a_detected_body_is_dropped():
+    frames = list(range(0, 24))
+    # id 2 is a second fragment of id 1's player: detected 0-3, then interpolated on top of id 1 for
+    # twelve frames (longer than HOLE_REACH: a tail, not a blink), detected again 16-23
+    ground = {f: {1: np.array([10.0, 2.0]), **({2: np.array([10.1, 2.1])} if f < 4 or f >= 16 else {})} for f in frames}
+    views = {f: {1: ("sideline",), **({2: ("sideline",)} if 2 in ground[f] else {})} for f in frames}
+    out = tl.build_timeline(frames, ground, {}, views_by_frame=views)
+    assert sorted(s.pid for s in out.states[6]) == [1]              # interpolated 0.14 m from a detected body: dropped
+    assert sorted(s.pid for s in out.states[1]) == [1, 2]           # both detected: two people (the split's job)
+    # a hole within HOLE_REACH is the same id blinking and is kept -- dropping only the hole frames of
+    # a twin that is drawn on its detected frames was the flicker (2026-09-16, 14 of 32 live pops)
+    ground2 = {f: {1: np.array([10.0, 2.0]), **({2: np.array([10.1, 2.1])} if f < 4 or f >= 8 else {})} for f in frames}
+    views2 = {f: {1: ("sideline",), **({2: ("sideline",)} if 2 in ground2[f] else {})} for f in frames}
+    out2 = tl.build_timeline(frames, ground2, {}, views_by_frame=views2)
+    assert sorted(s.pid for s in out2.states[6]) == [1, 2]
+
+
+def test_an_id_unseen_for_long_dedupes_at_the_plain_radius():
+    frames = list(range(0, 80))
+    ground = {f: {1: np.array([10.0, 2.0]), 2: np.array([10.4, 2.3])} for f in frames}
+    for f in range(10, 70):                                # id 2 undetected for sixty frames
+        del ground[f][2]
+    views = {f: {1: ("sideline",), **({2: ("sideline",)} if 2 in ground[f] else {})} for f in frames}
+    out = tl.build_timeline(frames, ground, {}, views_by_frame=views, min_frames=6)
+    mid = sorted(s.pid for s in out.states[40])
+    assert mid == [1], mid                                  # no sighting within 30 frames: not anchored (and not filled: gap > max_gap)
+    assert sorted(s.pid for s in out.states[5]) == [1, 2]
+
+
+def test_place_from_refit_moves_two_view_bodies_to_the_refit_translation():
+    from nfl_gsplat.render.play_timeline import place_from_refit
+
+    ground = {0: {1: np.array([0.0, 0.0]), 2: np.array([5.0, 5.0])}, 1: {1: np.array([0.5, 0.0])}}
+    refit = {0: {1: {"transl": np.array([0.6, -0.2, 0.9])}, 3: {"transl": np.array([9.0, 9.0, 0.9])}},
+             1: {1: {"transl": np.array([8.0, 0.0, 0.9])}}}             # frame 1: 7.5 m away, refused
+    out, shifts = place_from_refit(ground, refit)
+    assert np.allclose(out[0][1], [0.6, -0.2]) and np.allclose(out[0][2], [5.0, 5.0])
+    assert np.allclose(out[1][1], [0.5, 0.0])
+    assert len(shifts) == 1 and abs(shifts[0] - np.hypot(0.6, 0.2)) < 1e-9
+    assert np.allclose(ground[0][1], [0.0, 0.0])                       # input untouched
+
+
+def test_two_view_poses_keep_a_45_degree_bend_single_view_do_not():
+    from scipy.spatial.transform import Rotation
+
+    # An upright body (Rx(90) stands SMPL-X up) bent 45 deg forward.
+    bent = (Rotation.from_euler("y", 45, degrees=True)
+            * Rotation.from_euler("x", 90, degrees=True)).as_rotvec()
+    ground = {0: {1: np.array([0.0, 0.0]), 2: np.array([5.0, 0.0])}}
+    poses = {1: {0: (np.zeros((21, 3)), bent, np.zeros(10), "fused")},
+             2: {0: (np.zeros((21, 3)), bent, np.zeros(10), "sideline")}}
+    out = tl.build_timeline([0], ground, poses, default_pose=np.zeros((21, 3)), default_betas=np.zeros(10),
+                            min_frames=1)
+    by = {s.pid: s for s in out.states[0]}
+    assert not by[1].clamped and by[2].clamped
+
+
+def test_interpolated_frames_inherit_the_nearest_recorded_views():
+    ground = {f: {1: np.array([float(f) * 0.1, 0.0])} for f in range(0, 30)}
+    views = {0: {1: ("endzone",)}, 29: {1: ("endzone",)}}       # recorded twice, one camera
+    tl_ = tl.build_timeline(list(range(30)), ground, {}, default_pose=np.zeros((21, 3)),
+                            default_betas=np.zeros(10), views_by_frame=views, min_frames=1)
+    assert all(s.views == ("endzone",) for f in tl_.frames for s in tl_.states[f])
+
+
+def test_excluded_ids_are_left_out():
+    ground = {0: {1: np.array([0.0, 0.0]), 2: np.array([5.0, 0.0])}}
+    tl_ = tl.build_timeline([0], ground, {}, default_pose=np.zeros((21, 3)),
+                            default_betas=np.zeros(10), min_frames=1, exclude={2})
+    assert [s.pid for s in tl_.states[0]] == [1]
+
+
+def test_place_from_refit_interpolates_the_translation_across_a_short_gap():
+    from nfl_gsplat.render.play_timeline import place_from_refit
+
+    ground = {f: {1: np.array([1.0, 0.0])} for f in range(0, 6)}          # the box point, 0-0.4 m from the records
+    ground[10] = {1: np.array([1.0, 0.0])}
+    ground[30] = {1: np.array([5.0, 0.0])}
+    refit = {0: {1: {"transl": np.array([1.0, 0.0, 0.9])}}, 4: {1: {"transl": np.array([1.4, 0.0, 0.9])}},
+             30: {1: {"transl": np.array([5.0, 0.0, 0.9])}}}
+    out, _ = place_from_refit(ground, refit, max_gap=12)
+    assert np.allclose(out[2][1], [1.2, 0.0])                            # inside the 3-frame gap: interpolated
+    # with a pelvis function the records place at their pelvis, the interpolation too
+    out2, _ = place_from_refit(ground, refit, max_gap=12, pelvis_xy=lambda r: r["transl"][:2] + np.array([0.0, -0.35]))
+    assert np.allclose(out2[0][1], [1.0, -0.35]) and np.allclose(out2[2][1], [1.2, -0.35])
+    assert np.allclose(out[10][1], [1.0, 0.0])                           # the 25-frame gap: left alone
+    assert np.allclose(out[5][1], [1.0, 0.0])                            # after the last record: left alone
+
+
+def test_smooth_axis_angles_damps_noise_and_keeps_a_ramp():
+    rng = np.random.default_rng(0)
+    T = 60
+    ramp = np.linspace(0, 1.0, T)[:, None, None] * np.ones((1, 21, 3))
+    noisy = ramp + rng.normal(0, 0.1, ramp.shape)
+    sm = tl.smooth_axis_angles(noisy, window=9)
+    assert sm.shape == noisy.shape
+    d2 = lambda a: np.abs(np.diff(a, n=2, axis=0)).mean()
+    assert d2(sm) < 0.3 * d2(noisy)                                    # the noise goes
+    assert abs(sm[30, 0, 0] - ramp[30, 0, 0]) < 0.05                   # the ramp stays
+    assert np.allclose(tl.smooth_axis_angles(ramp, window=1), ramp)   # off
+
+
+def test_gaussian_pose_smoother_kills_per_frame_noise_the_median_keeps_and_passes_a_swing():
+    """The fits are noisy on EVERY frame at the extremities (play 1, 2026-09-15): a median drops
+    isolated spikes and leaves that alone; a Gaussian averages it down. A real arm swing (1 Hz at
+    60 fps) has to pass through nearly whole."""
+    T = 120
+    t = np.arange(T)
+    swing = 0.6 * np.sin(2 * np.pi * t / 60.0)                         # 1 Hz, 0.6 rad amplitude
+    noise = 0.1 * np.where(t % 2 == 0, 1.0, -1.0)                      # +-0.1 rad every frame
+    seq = np.zeros((T, 21, 3))
+    seq[:, 5, 0] = swing + noise
+    g = tl.smooth_axis_angles_gaussian(seq, sigma=2.0)
+    m = tl.smooth_axis_angles(seq, window=7)
+    resid = lambda a: np.abs(a[:, 5, 0] - swing)[10:-10].max()         # away from the held edges
+    assert resid(g) < 0.03                                             # noise gone, swing kept (< 5 %)
+    assert resid(m) > 0.08                                             # the median keeps the toggling
+    assert g.shape == seq.shape and np.allclose(g[:, :5], 0.0)         # untouched joints stay zero
+    assert np.allclose(tl.smooth_axis_angles_gaussian(seq, sigma=0), seq)   # off
+
+
+def test_hinge_clamp_fixes_a_backwards_knee_and_a_sideways_elbow_and_leaves_the_rest():
+    """Play 1's fits bend knees backwards (-104 deg) and elbows sideways (121 deg off the hinge axis)
+    on the ids whose limbs jitter most. The clamp names those and nothing else: a collar turning
+    150 deg is left alone on purpose (clamping it was measured to move the arm off the keypoints)."""
+    seq = np.zeros((5, 21, 3))
+    seq[:, 3, 0] = np.radians(-104)                   # L_knee bent backwards
+    seq[:, 4, 0] = np.radians(120)                    # R_knee: a sprint, fine
+    seq[:, 18, 1] = np.radians(40)                    # R_elbow flexed 40 (positive about y)
+    seq[:, 18, 0] = np.radians(60)                    # ... and turned 60 off its axis
+    seq[:, 17, 1] = np.radians(-30)                   # L_elbow flexed 30 (negative about y), fine
+    seq[:, 12, 2] = np.radians(150)                   # L_collar: absurd, untouched
+    out = tl.clamp_hinges(seq)
+    assert np.allclose(np.degrees(out[:, 3, 0]), -5)                          # clipped to the limit
+    assert np.allclose(out[:, 4], seq[:, 4]) and np.allclose(out[:, 17], seq[:, 17])
+    assert np.allclose(np.degrees(out[:, 18, 1]), 40)                          # flexion kept
+    assert np.allclose(np.degrees(out[:, 18, 0]), 25) and np.allclose(out[:, 18, 2], 0)   # off-axis scaled
+    assert np.allclose(out[:, 12], seq[:, 12])
+    assert np.allclose(tl.clamp_hinges(np.zeros((3, 21, 3))), 0.0)
+
+
+def test_ground_positions_take_the_foot_above_the_box_margin():
+    import pandas as pd
+
+    from nfl_gsplat.calibration.cameras_io import CameraTrack
+    from nfl_gsplat.compositing.preview_cpu import intrinsics, look_at
+    from nfl_gsplat.render.play_timeline import BOX_MARGIN_FRAC, ground_positions
+
+    K = intrinsics(1920, 1080, fov_deg=12.0)
+    R, t = look_at(np.array([0.0, -100.0, 40.0]), np.array([0.0, 0.0, 0.0]))
+    track = CameraTrack(K=K[None], R=R[None], t=t[None], conf=np.ones(1), width=1920, height=1080)
+    # both ids, as the real table carries them; ground_positions keys by the player, not the tracker
+    box = pd.DataFrame([{"cam": "sideline", "frame": 0, "track_id": 1, "global_player_id": 1,
+                         "bbox_x1": 940, "bbox_y1": 400, "bbox_x2": 980, "bbox_y2": 540}])
+    g0 = ground_positions(box, {"sideline": track}, margin_frac=0.0)[0][1]
+    g1 = ground_positions(box, {"sideline": track})[0][1]
+    assert BOX_MARGIN_FRAC > 0
+    # the box bottom is 140 px tall; its ground point lies toward the camera (smaller y) of the true foot's
+    assert g1[1] > g0[1] and 0.05 < g1[1] - g0[1] < 0.6
+
+
+def test_orientation_gets_the_gaussian_by_default_and_a_yaw_toggle_is_damped():
+    """global_orient kept the 7-frame median after body_pose got its Gaussian (2026-09-16: yaw jitter
+    p90 2.7 -> 0.5 deg/frame^2 at sigma 4 for ~1 px of reprojection). The median leaves a per-frame
+    toggle at +-0.1 rad; the Gaussian removes it."""
+    frames = list(range(0, 40))
+    ground = {f: {1: np.array([f * 0.05, 1.0])} for f in frames}
+    yaws = [0.3 + 0.1 * (1 if f % 2 == 0 else -1) for f in frames]           # facing +-0.1 rad about 0.3
+    poses = {1: {f: (np.zeros((21, 3)), tl.upright_from_yaw(y), np.zeros(10), "fused") for f, y in zip(frames, yaws)}}
+    out = tl.build_timeline(frames, ground, poses)
+    got = np.array([tl.yaw_of([s for s in out.states[f] if s.pid == 1][0].global_orient) for f in frames[8:-8]])
+    assert np.abs(got - 0.3).max() < 0.02, got                              # the toggle is gone
+    out_med = tl.build_timeline(frames, ground, poses, orient_sigma=0)
+    got_med = np.array([tl.yaw_of([s for s in out_med.states[f] if s.pid == 1][0].global_orient) for f in frames[8:-8]])
+    assert np.abs(got_med - 0.3).max() > 0.05                                # the median kept it
+    assert tl.ORIENT_SMOOTH_SIGMA == 4.0
+
+
+def test_a_short_fragment_riding_a_teammate_is_a_rider_and_a_long_or_lone_one_is_not():
+    """Play 1's id 162: 19 frames, within 0.6 m of a Chiefs body on 53 % of them, its own detections
+    flipping between two adjacent men. A long track beside a teammate (a lineman) and a short
+    fragment on its own are kept."""
+    frames = list(range(0, 100))
+    ground = {f: {1: np.array([10.0, 0.0]), 2: np.array([10.4, 0.2]), 3: np.array([30.0, 5.0])} for f in frames}
+    for f in range(20, 100):                       # id 2 exists for 20 frames only, on id 1's shoulder
+        del ground[f][2]
+    for f in range(0, 100):                        # id 4: short, alone
+        if f < 15:
+            ground[f][4] = np.array([50.0, 50.0])
+    # sideline views: the dedupe never touches a sideline detection, which is exactly why 162 survived it
+    views = {f: {p: ("sideline",) for p in g} for f, g in ground.items()}
+    out = tl.build_timeline(frames, ground, {}, views_by_frame=views)
+    team = {1: "KC", 2: "KC", 3: "BAL", 4: "BAL"}
+    assert tl.rider_ids(out, team) == {2}
+    assert tl.rider_ids(out, {**team, 2: "BAL"}) == set()      # a different team beside him is not a rider
+    n = tl.drop_ids(out, {2})
+    assert n == 20 and all(2 not in [s.pid for s in out.states[f]] for f in frames)
+
+
+def _sweep_through_half_turn(n=41, lo_deg=165.0, hi_deg=195.0, axis=(0.0, 0.66, 0.75)):
+    """Canonical axis-angle rows (as the keyframe SLERP returns them) of a body turning smoothly
+    THROUGH a half turn about one axis: the magnitude passes pi mid-way and the canonical vector
+    flips sign there."""
+    a = np.asarray(axis, float)
+    a /= np.linalg.norm(a)
+    angles = np.radians(np.linspace(lo_deg, hi_deg, n))
+    return Rotation.from_rotvec(angles[:, None] * a[None]).as_rotvec()
+
+
+def _angular_error_deg(a, b):
+    return np.degrees((Rotation.from_rotvec(a).inv() * Rotation.from_rotvec(b)).magnitude())
+
+
+def test_unwrap_makes_a_half_turn_sweep_continuous():
+    seq = _sweep_through_half_turn()
+    assert np.any(np.sum(seq[:-1] * seq[1:], axis=1) < 0), "the fixture must flip sign somewhere"
+    un = tl.unwrap_axis_angles(seq)
+    # every row is still the same rotation, and neighbours are now close in the vector space
+    assert np.all(_angular_error_deg(seq, un) < 1e-6)
+    steps = np.linalg.norm(np.diff(un, axis=0), axis=1)
+    assert steps.max() < np.radians(1.0)
+    # a joint-shaped [T, J, 3] input is unwrapped per joint
+    stacked = np.stack([seq, seq[::-1]], axis=1)
+    un2 = tl.unwrap_axis_angles(stacked)
+    assert un2.shape == stacked.shape and np.allclose(un2[:, 0], un)
+
+
+def test_orientation_gaussian_survives_a_half_turn():
+    """A body with its back to the camera has |global_orient| near pi; when it turns through pi the
+    canonical vectors flip sign and a component-wise Gaussian averages antipodal vectors into a
+    garbage orientation for ~2 sigma frames (play 1's id 0: legs splayed for 12 frames at the snap,
+    cache legs 4 px on the keypoints). Unwrapping first makes the Gaussian exact again."""
+    seq = _sweep_through_half_turn()
+    raw = tl.smooth_axis_angles_gaussian(seq, sigma=4.0)
+    fixed = tl.smooth_axis_angles_gaussian(tl.unwrap_axis_angles(seq), sigma=4.0)
+    err_raw = np.array([_angular_error_deg(s, r) for s, r in zip(seq, raw)])
+    err_fixed = np.array([_angular_error_deg(s, r) for s, r in zip(seq, fixed)])
+    assert err_raw.max() > 30.0, f"negative control: the plain Gaussian should break, got {err_raw.max():.1f} deg"
+    # the held edges bias a ramp by ~sigma * slope (1.2 deg here); the interior is exact
+    assert err_fixed.max() < 2.0, f"unwrapped Gaussian off by {err_fixed.max():.2f} deg"
+    assert err_fixed[8:-8].max() < 0.1
+
+
+def test_orphan_ids_drops_only_short_teamless_fragments():
+    """Play 1's id 203: eight frames, no team, drawn in the default kit on the pile. A teamless id drawn
+    for longer is a real unidentified man and stays; a short TEAMED fragment is the rider rule's."""
+    frames = list(range(100, 200))
+    ground = {f: {1: np.array([0.0, 0.0]), 2: np.array([5.0, 0.0])} for f in frames}
+    for f in frames[:8]:
+        ground[f][203] = np.array([2.0, 0.0])         # teamless, 8 frames (clear of the dedupe box)
+    for f in frames[:8]:
+        ground[f][77] = np.array([7.0, 0.0])          # teamed, 8 frames: not this rule's
+    for f in frames:
+        ground[f][99] = np.array([10.0, 0.0])         # teamless, 100 frames: a real unidentified man
+    tl_ = tl.build_timeline(frames, ground, {}, default_pose=np.zeros((21, 3)), default_betas=np.zeros(10),
+                            min_frames=1, pose_smooth=0, pose_sigma=0, clamp_joints=False, orient_sigma=0)
+    team_of = {1: "KC", 2: "BAL", 77: "KC"}
+    assert tl.orphan_ids(tl_, team_of) == {203}
+    assert tl.orphan_ids(tl_, team_of, max_frames=4) == set()
+    n = tl.drop_ids(tl_, tl.orphan_ids(tl_, team_of))
+    assert n == 8 and all(203 not in {s.pid for s in tl_.states[f]} for f in frames)
+
+
+def test_fill_gap_bridge_is_ten_frames_by_default():
+    """A body glides across a gap of at most FILL_GAP_FRAMES; a longer one is left empty (measured
+    2026-09-16: the 30-frame bridge let two bodies glide 2-3 m across the pile unseen)."""
+    assert tl.FILL_GAP_FRAMES == 10 and tl.MAX_GAP_FRAMES == 30
+    frames = list(range(40))
+    xy = np.full((40, 2), np.nan)
+    xy[0] = [0.0, 0.0]
+    xy[9] = [9.0, 0.0]          # an 8-frame gap: bridged
+    xy[39] = [39.0, 0.0]        # a 29-frame gap: not bridged by default, bridged at 30
+    filled = tl.fill_gaps(frames, xy)
+    assert np.allclose(filled[5], [5.0, 0.0]) and np.isnan(filled[20]).all()
+    assert np.allclose(tl.fill_gaps(frames, xy, max_gap=tl.MAX_GAP_FRAMES)[20], [20.0, 0.0])
+
+
+def test_a_short_detection_hole_keeps_its_filled_frame_but_a_fragment_tail_does_not():
+    """Two linemen 0.3 m apart. Id 1's sideline detection drops on frame 105 only: its filled frame
+    is a hole (detected on both sides within HOLE_REACH) and stays. Id 3 is detected up to 104 and
+    never again: its filled frames after are a tail riding id 2 and go, as before."""
+    frames = list(range(100, 112))
+    ground = {f: {1: np.array([0.0, 0.0]), 2: np.array([0.3, 0.0])} for f in frames}
+    for f in frames:
+        ground[f][3] = np.array([0.3, 0.05])
+    views = {f: {1: ("sideline",), 2: ("sideline",), 3: ("sideline",)} for f in frames}
+    views[105] = {2: ("sideline",), 3: ("sideline",)}                   # id 1 blinks on 105
+    for f in range(105, 112):
+        views[f] = {k: v for k, v in views[f].items() if k != 3}         # id 3 ends at 104
+    kw = dict(default_pose=np.zeros((21, 3)), default_betas=np.zeros(10), min_frames=1, pose_smooth=0,
+              pose_sigma=0, clamp_joints=False, orient_sigma=0, views_by_frame=views)
+    tl_ = tl.build_timeline(frames, ground, {}, **kw)
+    assert 1 in {s.pid for s in tl_.states[105]}                         # the hole is kept
+    assert all(3 not in {s.pid for s in tl_.states[f]} for f in range(106, 112))   # the tail is not
+    tl_old = tl.build_timeline(frames, ground, {}, hole_reach=0, **kw)
+    assert 1 not in {s.pid for s in tl_old.states[105]}                  # the old rule dropped the hole
+
+
+def test_twin_frames_drops_the_shorter_id_on_a_long_close_stretch_only():
+    """Ids 1 and 2 (same team) 0.15 m apart for 12 consecutive frames: the one drawn on fewer frames
+    loses those 12. A 5-frame brush, a cross-team pair, and a pair 0.5 m apart (past TWIN_M, 0.4 since
+    2026-09-18) are left alone."""
+    frames = list(range(0, 60))
+    ground = {f: {1: np.array([0.0, 0.0]), 3: np.array([5.0, 0.0]), 4: np.array([5.15, 0.0]), 5: np.array([9.0, 0.0])} for f in frames}
+    for f in range(10, 22):
+        ground[f][2] = np.array([0.15, 0.0])            # twin of 1 for 12 frames
+    for f in range(40, 45):
+        ground[f][2] = np.array([0.15, 0.0])            # a 5-frame brush, past the bridge and the hole reach: not a run
+    for f in frames:
+        ground[f][6] = np.array([9.5, 0.0])             # 0.5 m from 5: a pile, not a twin
+    team_of = {1: "KC", 2: "KC", 3: "KC", 4: "BAL", 5: "BAL", 6: "BAL"}
+    views = {f: {pid: ("sideline",) for pid in ground[f]} for f in frames}     # all detected: the dedupe keeps them
+    tl_ = tl.build_timeline(frames, ground, {}, default_pose=np.zeros((21, 3)), default_betas=np.zeros(10),
+                            min_frames=1, pose_smooth=0, pose_sigma=0, clamp_joints=False, orient_sigma=0,
+                            views_by_frame=views)
+    drop = tl.twin_frames(tl_, team_of)
+    assert drop == {(f, 2) for f in range(10, 22)}
+    n = tl.drop_frames(tl_, drop)
+    assert n == 12 and all(2 not in {s.pid for s in tl_.states[f]} for f in range(10, 22))
+    assert all(2 in {s.pid for s in tl_.states[f]} for f in range(40, 45))
+    assert all({3, 4, 5, 6} <= {s.pid for s in tl_.states[f]} for f in frames)
+
+
+
+def test_box_twin_frames_drops_the_shorter_id_where_two_sideline_boxes_coincide():
+    """Ids 1 and 2 (same team) share one man's box on frames 10-19 (IoU 0.9); id 3 (same team) stands
+    beside them with a box overlapping id 1 at 0.4 like an engaged lineman; a run of 5 is too short."""
+    import pandas as pd
+    from nfl_gsplat.render.timeline import PlayerState, Timeline, box_twin_frames
+
+    frames = list(range(0, 30))
+    tl = Timeline(frames=frames)
+    rows = []
+    for f in frames:
+        for pid in (1, 2, 3):
+            tl.states.setdefault(f, []).append(PlayerState(pid=pid, xy=np.array([float(pid), 0.0]), body_pose=np.zeros((21, 3)),
+                                                          global_orient=np.zeros(3), betas=np.zeros(10), source="sideline",
+                                                          clamped=False, views=("sideline",)))
+        rows.append({"cam": "sideline", "track_id": 1, "global_player_id": 1, "frame": f, "bbox_x1": 100, "bbox_y1": 100, "bbox_x2": 140, "bbox_y2": 200})
+        if 10 <= f <= 19 or 25 <= f <= 29:                                               # a run of 10, then one of 5
+            rows.append({"cam": "sideline", "track_id": 2, "global_player_id": 2, "frame": f, "bbox_x1": 102, "bbox_y1": 100, "bbox_x2": 142, "bbox_y2": 200})
+        rows.append({"cam": "sideline", "track_id": 3, "global_player_id": 3, "frame": f, "bbox_x1": 124, "bbox_y1": 100, "bbox_x2": 164, "bbox_y2": 200})
+    df = pd.DataFrame(rows)
+    drop = box_twin_frames(tl, df, {1: "KC", 2: "KC", 3: "KC"}, iou_min=0.6, min_run=8)
+    assert drop == {(f, 2) for f in range(10, 20)}                                          # id 2 has fewer boxes: it loses
+    assert box_twin_frames(tl, df, {1: "KC", 2: "BAL", 3: "KC"}, iou_min=0.6, min_run=8) == set()   # different teams: never
+
+
+def test_despike_xy_removes_a_single_frame_spike_and_keeps_a_cut():
+    from nfl_gsplat.render.timeline import despike_xy
+
+    xy = np.stack([0.1 * np.arange(20), np.zeros(20)], axis=1)      # walking +x
+    xy[8] += [0.0, 0.5]                                              # a half-metre spike sideways for one frame
+    out = despike_xy(xy, excess_m=0.15)
+    assert abs(out[8, 1]) < 1e-9 and abs(out[8, 0] - 0.8) < 1e-9 and np.allclose(out[:8], xy[:8]) and np.allclose(out[9:], xy[9:])
+    cut = np.stack([0.1 * np.arange(20), np.where(np.arange(20) >= 10, 0.3 * (np.arange(20) - 9), 0.0)], axis=1)   # turns hard at 10
+    assert np.allclose(despike_xy(cut, excess_m=0.15), cut)         # every frame follows the new trend: nothing to remove
+    assert np.allclose(despike_xy(xy, excess_m=None), xy)
+    holes = xy.copy(); holes[7] = np.nan
+    out2 = despike_xy(holes, excess_m=0.15)
+    assert np.isnan(out2[7]).all() and abs(out2[8, 1] - 0.5) < 1e-9      # a hole in the window: the frame is left alone
+
+
+def test_yaw_from_motion_faces_the_first_heading_before_it_moves_and_turns_smoothly():
+    from nfl_gsplat.render.timeline import yaw_from_motion
+
+    xy = np.zeros((30, 2))
+    xy[10:, 0] = 0.2 * np.arange(20)                                  # still for 10 frames, then runs +x
+    yaw = yaw_from_motion(xy, smooth=1)
+    assert np.allclose(yaw[:10], yaw[12]) and abs(yaw[15]) < 1e-6      # the still frames face where it will run
+    # a turn from +x to +y over the run is smoothed, not stepped: no single-frame jump over 60 deg
+    xy2 = np.zeros((40, 2)); xy2[:20, 0] = 0.2 * np.arange(20); xy2[20:, 0] = xy2[19, 0]; xy2[20:, 1] = 0.2 * np.arange(1, 21)
+    y2 = yaw_from_motion(xy2, smooth=5)
+    d = np.abs(np.degrees(np.angle(np.exp(1j * (y2[1:] - y2[:-1])))))
+    assert d.max() < 60.0 and abs(np.degrees(y2[5])) < 15.0 and abs(np.degrees(y2[-3]) - 90.0) < 15.0
+
+
+def test_lying_frames_take_a_wider_pose_smoothing():
+    """A body whose left-hip angle flips every six frames: with the wider Gaussian on its lying
+    frames the swing there is damped, the standing frames keep the ordinary smoothing."""
+    from nfl_gsplat.render import timeline as tl
+
+    frames = list(range(0, 60))
+    ground = {f: {1: np.array([0.1 * f, 0.0])} for f in frames}
+    poses = {1: {}}
+    for f in range(0, 60, 2):
+        bp = np.zeros((21, 3)); bp[0, 0] = 0.6 if (f // 6) % 2 == 0 else -0.6
+        poses[1][f] = (bp, tl.upright_from_yaw(0.0), np.zeros(10), "fused")
+    kw = dict(default_pose=np.zeros((21, 3)), clamp_joints=False, orient_sigma=0)
+    plain = tl.build_timeline(frames, ground, poses, **kw)
+    wide = tl.build_timeline(frames, ground, poses, lying={(f, 1) for f in range(30, 60)}, lying_sigma_mult=4.0, **kw)
+    def swing(t, lo, hi):
+        return np.ptp([[s for s in t.states[f] if s.pid == 1][0].body_pose[0, 0] for f in range(lo, hi)])
+    assert swing(wide, 36, 54) < 0.5 * swing(plain, 36, 54)             # damped where lying
+    assert abs(swing(wide, 6, 24) - swing(plain, 6, 24)) < 1e-6          # untouched where standing
+
+
+def test_unreadable_kit_ids_drops_short_unnamed_fragments_only():
+    import pandas as pd
+    from nfl_gsplat.render.timeline import PlayerState, Timeline, unreadable_kit_ids
+
+    tl = Timeline(frames=list(range(0, 60)))
+    rows = []
+    for f in range(0, 60):
+        for pid, n in ((1, 60), (2, 20), (3, 20), (4, 20)):
+            if f < n:
+                tl.states.setdefault(f, []).append(PlayerState(pid=pid, xy=np.zeros(2), body_pose=np.zeros((21, 3)), global_orient=np.zeros(3),
+                                                              betas=np.zeros(10), source="sideline"))
+                rows.append({"cam": "sideline", "track_id": pid, "global_player_id": pid, "frame": f,
+                             "kit_margin": {1: 0.05, 2: 0.05, 3: 0.7, 4: 0.05}[pid]})
+    df = pd.DataFrame(rows)
+    # 1: long (kept); 2: short, unreadable, unnamed (dropped); 3: short but a clear kit (kept); 4: short, unreadable, but named (kept)
+    assert unreadable_kit_ids(tl, df, {4: True}, margin=0.2, max_frames=40) == {2}
+
+
+def test_impossible_runs_marks_a_sustained_teleport_and_not_a_sprint():
+    from nfl_gsplat.render.timeline import PlayerState, Timeline, impossible_runs
+
+    tl = Timeline(frames=list(range(0, 40)))
+    for f in range(0, 40):
+        x1 = 0.18 * f                                                   # id 1 sprints at 0.18 m/frame (11 m/s): legal
+        x2 = 0.05 * f + (0.3 * (f - 10) if 10 <= f <= 15 else (1.5 if f > 15 else 0.0))   # id 2 slides 1.5 m over 10-15
+        for pid, x in ((1, x1), (2, x2)):
+            tl.states.setdefault(f, []).append(PlayerState(pid=pid, xy=np.array([x, 0.0]), body_pose=np.zeros((21, 3)),
+                                                          global_orient=np.zeros(3), betas=np.zeros(10), source="sideline"))
+    d = impossible_runs(tl, max_m=0.2, min_run=4)
+    assert {p for _f, p in d} == {2} and {f for f, _p in d} == set(range(10, 16))
+    assert impossible_runs(tl, max_m=0.2, min_run=7) == set()
+
+
+def test_build_timeline_keep_exempts_a_vouched_unanchored_body_from_the_dedupe():
+    """A body with no sideline sighting standing 0.8 m from a detected one is a duplicate to the
+    dedupe -- unless a rule vouched for it (``keep``): the quarterback held under centre."""
+    from nfl_gsplat.render import timeline as tl
+
+    frames = list(range(0, 30))
+    ground = {f: {1: np.array([0.0, 0.0]), 2: np.array([0.8, 0.0])} for f in frames}
+    views = {f: {1: ["sideline"]} for f in frames}                      # only id 1 is ever detected
+    poses = {1: {0: (np.zeros((21, 3)), tl.upright_from_yaw(0.0), np.zeros(10), "fused")},
+             2: {0: (np.zeros((21, 3)), tl.upright_from_yaw(0.0), np.zeros(10), "fused")}}
+    kw = dict(default_pose=np.zeros((21, 3)), views_by_frame=views, pose_smooth=0, pose_sigma=0, clamp_joints=False, orient_sigma=0)
+    plain = tl.build_timeline(frames, ground, poses, **kw)
+    kept = tl.build_timeline(frames, ground, poses, keep={f: {2} for f in frames}, **kw)
+    assert all(not any(s.pid == 2 for s in plain.states[f]) for f in frames)
+    assert all(any(s.pid == 2 for s in kept.states[f]) for f in frames)
+
+
+def test_hold_to_end_keeps_a_body_that_ends_at_the_dead_ball_through_the_tail():
+    import numpy as np
+
+    from nfl_gsplat.render import timeline as tlm
+
+    def st(pid, x):
+        return tlm.PlayerState(pid=pid, xy=np.array([x, 0.0]), body_pose=np.zeros((21, 3)), global_orient=np.zeros(3),
+                               betas=np.zeros(10), source="sideline")
+    tl = tlm.Timeline(frames=list(range(630, 648)), states={f: [] for f in range(630, 648)})
+    for f in range(630, 639):
+        tl.states[f].append(st(71, float(f)))                  # the receiver, out of bounds after 638
+    for f in range(630, 648):
+        tl.states[f].append(st(5, 1.0))                          # a man drawn to the end
+    for f in range(630, 633):
+        tl.states[f].append(st(9, 2.0))                          # a fragment that ended long before the dead ball
+    n = tlm.hold_to_end(tl, end=639, last_frame=647)
+    assert n == 647 - 638
+    assert all(any(s.pid == 71 and s.xy[0] == 638.0 for s in tl.states[f]) for f in range(639, 648))
+    assert not any(s.pid == 9 for s in tl.states[640])
+    assert sum(1 for s in tl.states[645] if s.pid == 5) == 1
+
+
+def test_hold_to_end_always_holds_the_carrier_from_wherever_his_track_ends():
+    import numpy as np
+
+    from nfl_gsplat.render import timeline as tlm
+
+    def st(pid, x):
+        return tlm.PlayerState(pid=pid, xy=np.array([x, 0.0]), body_pose=np.zeros((21, 3)), global_orient=np.zeros(3),
+                               betas=np.zeros(10), source="sideline")
+    tl = tlm.Timeline(frames=list(range(590, 616)), states={f: [] for f in range(590, 616)})
+    for f in range(590, 603):
+        tl.states[f].append(st(74, float(f)))                  # the receiver, lost under the pile after 602
+    for f in range(590, 603):
+        tl.states[f].append(st(9, 2.0))                          # a fragment ending at the same frame: not held
+    for f in range(590, 616):
+        tl.states[f].append(st(5, 1.0))
+    n = tlm.hold_to_end(tl, end=607, last_frame=615, always={74})
+    assert n == 615 - 602
+    assert all(any(s.pid == 74 and s.xy[0] == 602.0 for s in tl.states[f]) for f in range(603, 616))
+    assert not any(s.pid == 9 for s in tl.states[610])
+
+
+def test_hold_to_end_drops_a_track_born_at_the_dead_ball_beside_the_held_man():
+    import numpy as np
+
+    from nfl_gsplat.render import timeline as tlm
+
+    def st(pid, x, y=0.0):
+        return tlm.PlayerState(pid=pid, xy=np.array([x, y]), body_pose=np.zeros((21, 3)), global_orient=np.zeros(3),
+                               betas=np.zeros(10), source="sideline")
+    tl = tlm.Timeline(frames=list(range(630, 648)), states={f: [] for f in range(630, 648)})
+    for f in range(630, 639):
+        tl.states[f].append(st(71, 10.0))                       # the receiver's track ends at 638
+    for f in range(639, 648):
+        tl.states[f].append(st(185, 12.0))                      # born at 639, 2 m away: the same man re-identified
+        tl.states[f].append(st(2, 12.5))                        # a defender born there too: kept (other team)
+    for f in range(630, 648):
+        tl.states[f].append(st(5, 11.0))                        # a teammate present all along, 1 m away: kept
+    teams = {71: "KC", 185: "KC", 2: "BAL", 5: "KC"}
+    n = tlm.hold_to_end(tl, end=639, last_frame=647, teams=teams)
+    assert n == 9
+    for f in range(639, 648):
+        pids = sorted(int(s.pid) for s in tl.states[f])
+        assert pids == [2, 5, 71]
+
+
+def test_twin_frames_leaves_two_men_whose_sideline_boxes_do_not_overlap():
+    import numpy as np
+
+    from nfl_gsplat.render import timeline as tlm
+
+    def st(pid, x, y):
+        return tlm.PlayerState(pid=pid, xy=np.array([x, y]), body_pose=np.zeros((21, 3)), global_orient=np.zeros(3),
+                               betas=np.zeros(10), source="sideline")
+    tl = tlm.Timeline(frames=list(range(90, 130)), states={f: [st(17, 0.0, 0.0)] for f in range(90, 130)})
+    for f in range(100, 130):
+        tl.states[f].append(st(38, 0.3, 0.1))          # 17 has more frames overall, so 38 is the loser
+    teams = {17: "KC", 38: "KC"}
+    assert {p for _f, p in tlm.twin_frames(tl, teams, twin_m=0.4, min_run=8)} == {38}
+    side_by_side = {(f, 17): (100.0, 100.0, 160.0, 240.0) for f in range(100, 130)}
+    side_by_side.update({(f, 38): (170.0, 100.0, 230.0, 240.0) for f in range(100, 130)})       # boxes touching, no overlap
+    assert tlm.twin_frames(tl, teams, twin_m=0.4, min_run=8, boxes=side_by_side, box_iou_min=0.3) == set()
+    on_top = {(f, 17): (100.0, 100.0, 160.0, 240.0) for f in range(100, 130)}
+    on_top.update({(f, 38): (108.0, 104.0, 166.0, 244.0) for f in range(100, 130)})               # the same man twice
+    assert {p for _f, p in tlm.twin_frames(tl, teams, twin_m=0.4, min_run=8, boxes=on_top, box_iou_min=0.3)} == {38}
+    missing = {(f, 17): (100.0, 100.0, 160.0, 240.0) for f in range(100, 130)}                   # 38 has no sideline box: the distance decides
+    assert {p for _f, p in tlm.twin_frames(tl, teams, twin_m=0.4, min_run=8, boxes=missing, box_iou_min=0.3)} == {38}
+
+
+def test_twin_frames_lets_the_endzone_camera_split_two_linemen_the_sideline_sees_overlapping():
+    import numpy as np
+
+    from nfl_gsplat.render import timeline as tlm
+
+    def st(pid, x, y):
+        return tlm.PlayerState(pid=pid, xy=np.array([x, y]), body_pose=np.zeros((21, 3)), global_orient=np.zeros(3),
+                               betas=np.zeros(10), source="sideline")
+    tl = tlm.Timeline(frames=list(range(90, 130)), states={f: [st(17, 0.0, 0.0)] for f in range(90, 130)})
+    for f in range(100, 130):
+        tl.states[f].append(st(38, 0.3, 0.1))
+    teams = {17: "KC", 38: "KC"}
+    sideline = {(f, p): (100.0 + (8.0 if p == 38 else 0.0), 100.0, 160.0 + (8.0 if p == 38 else 0.0), 240.0) for f in range(100, 130) for p in (17, 38)}
+    endzone = {(f, 17): (400.0, 300.0, 440.0, 400.0) for f in range(100, 130)}
+    endzone.update({(f, 38): (450.0, 300.0, 490.0, 400.0) for f in range(100, 130)})     # side by side, apart
+    both = {"sideline": sideline, "endzone": endzone}
+    assert {p for _f, p in tlm.twin_frames(tl, teams, twin_m=0.4, min_run=8, boxes={"sideline": sideline}, box_iou_min=0.3)} == {38}
+    assert tlm.twin_frames(tl, teams, twin_m=0.4, min_run=8, boxes=both, box_iou_min=0.3) == set()
+    twin_ez = dict(endzone); twin_ez.update({(f, 38): (404.0, 302.0, 444.0, 402.0) for f in range(100, 130)})
+    assert {p for _f, p in tlm.twin_frames(tl, teams, twin_m=0.4, min_run=8, boxes={"sideline": sideline, "endzone": twin_ez}, box_iou_min=0.3)} == {38}
+
+
+def _st_(pid, x, y):
+    import numpy as np
+
+    from nfl_gsplat.render import timeline as tlm
+    return tlm.PlayerState(pid=pid, xy=np.array([x, y]), body_pose=np.zeros((21, 3)), global_orient=np.zeros(3),
+                           betas=np.zeros(10), source="sideline")
+
+
+def test_stand_still_bridges_a_close_hole_and_holds_a_slow_end_but_not_where_a_teammate_stands():
+    import numpy as np
+
+    from nfl_gsplat.render import timeline as tlm
+
+    tl = tlm.Timeline(frames=list(range(400, 460)), states={f: [] for f in range(400, 460)})
+    for f in list(range(400, 420)) + list(range(431, 460)):
+        tl.states[f].append(_st_(17, 0.0 + 0.01 * (f - 400), 0.0))        # a hole 420-430, the man barely moved
+    for f in range(400, 440):
+        tl.states[f].append(_st_(37, 5.0, 5.0))                            # ends at 439 while standing still
+    for f in range(400, 460):
+        tl.states[f].append(_st_(9, 20.0 + 0.5 * (f - 400), 0.0))          # a runner, drawn throughout
+    for f in range(450, 460):
+        tl.states[f].append(_st_(204, 5.1, 5.0))                           # 37's continuation under another id from 450
+    for f in range(400, 430):
+        tl.states[f].append(_st_(40, 30.0, 0.0))                           # ends at 429 while sprinting away
+    teams = {17: "KC", 37: "KC", 9: "KC", 204: "KC", 40: "BAL"}
+    for f in range(420, 430):
+        tl.states[f].append(_st_(40, 30.0 + 0.3 * (f - 419), 0.0))
+    rep = tlm.stand_still(tl, teams, lo=395, hi=459, bridge_m=1.5, slow_m=1.0, window=10, clear_m=0.6, hold=True, hold_max=40)
+    assert rep["bridged"] == 11                                             # 17 on 420-430
+    assert all(any(s.pid == 17 for s in tl.states[f]) for f in range(420, 431))
+    assert rep["held"] == 10                                                # 37 on 440-449, stopping where 204 stands
+    assert all(any(s.pid == 37 for s in tl.states[f]) for f in range(440, 450))
+    assert not any(s.pid == 37 for s in tl.states[452])
+    assert not any(s.pid == 40 for s in tl.states[435])                     # a sprinter's end is not held
+    tl3 = tlm.Timeline(frames=list(range(400, 460)), states={f: [] for f in range(400, 460)})
+    for f in range(400, 440):
+        tl3.states[f].append(_st_(37, 5.0, 5.0))
+    only_bridge = tlm.stand_still(tl3, {37: "KC"}, lo=395, hi=459, bridge_m=1.5, hold=False)
+    assert only_bridge["held"] == 0                                           # holds off: the bridge alone
+    capped = tlm.stand_still(tl3, {37: "KC"}, lo=395, hi=459, bridge_m=1.5, hold=True, hold_max=5)
+    assert capped["held"] == 5
+    v = tlm.vanishings(tl, teams, lo=395, hi=459)
+    assert v["hole_frames"] == 0 and v["end_frames"] == 30 and v["worst"][0][0] == 40   # only the sprinter's exit is left, as it should be ...
+    tl2 = tlm.Timeline(frames=list(range(400, 460)), states={f: [] for f in range(400, 460)})
+    for f in list(range(400, 420)) + list(range(431, 440)):
+        tl2.states[f].append(_st_(17, 0.0, 0.0))
+    v2 = tlm.vanishings(tl2, {17: "KC"}, lo=395, hi=459)
+    assert v2["holes"] == 1 and v2["hole_frames"] == 11 and v2["end_frames"] == 20 and v2["worst"][0][0] == 17   # ... before the rule
+
+
+def test_stand_still_hold_reads_the_boxes_pile_holds_new_id_on_the_spot_stops_open_turf_stops():
+    from nfl_gsplat.render import timeline as _tlm_u
+    _was_u = _tlm_u.STAND_UNCOVERED_FRAMES
+    _tlm_u.STAND_UNCOVERED_FRAMES = 1                       # this test reads the old rule: the first open-turf frame ends the hold
+    try:
+        from nfl_gsplat.render import timeline as tlm
+
+        tl = tlm.Timeline(frames=list(range(400, 460)), states={f: [] for f in range(400, 460)})
+        boxes = {"sideline": {}}
+        for f in range(400, 440):
+            tl.states[f].append(_st_(204, 0.0, 0.0))                           # the centre, ends at 439 standing still
+            boxes["sideline"][(f, 204)] = (100, 100, 160, 260)
+        for f in range(400, 460):
+            tl.states[f].append(_st_(139, 1.1, 0.0))                           # the guard beside him: boxes overlap a little
+            boxes["sideline"][(f, 139)] = (145, 100, 205, 260)
+            tl.states[f].append(_st_(84, -0.5, 0.4))                           # the nose tackle on him: covers his box
+            boxes["sideline"][(f, 84)] = (95, 110, 165, 270)
+        for f in range(400, 440):
+            tl.states[f].append(_st_(40, 5.0, 5.0))                            # a Raven, ends at 439 ...
+            boxes["sideline"][(f, 40)] = (500, 100, 560, 260)
+        for f in range(440, 460):
+            tl.states[f].append(_st_(198, 5.8, 5.2))                           # ... and goes on as 198, box on the same spot
+            boxes["sideline"][(f, 198)] = (505, 102, 565, 262)
+        for f in range(400, 440):
+            tl.states[f].append(_st_(1, 9.0, 9.0))                             # a Raven who walks off: nothing on his box after 445
+            boxes["sideline"][(f, 1)] = (900, 100, 960, 260)
+        for f in range(440, 446):
+            tl.states[f].append(_st_(74, 9.7, 9.3))
+            boxes["sideline"][(f, 74)] = (905, 105, 965, 265)
+        for f in range(446, 460):
+            tl.states[f].append(_st_(74, 12.0, 9.3))
+            boxes["sideline"][(f, 74)] = (1200, 105, 1260, 265)
+        for f in range(400, 440):
+            tl.states[f].append(_st_(198, 15.0, 5.0))                          # a Raven, ends at 439 ...
+            boxes["sideline"][(f, 198)] = (1500, 100, 1560, 260)
+        for f in range(440, 460):
+            tl.states[f].append(_st_(206, 15.6, 5.3))                          # ... and goes on as 206, born the frame after, IoU 0.36
+            boxes["sideline"][(f, 206)] = (1525, 112, 1585, 272)
+        for f in range(400, 440):
+            tl.states[f].append(_st_(166, 20.0, 5.0))                          # a lineman, ends at 439, an OLD teammate's box behind him at IoU 0.36
+            boxes["sideline"][(f, 166)] = (2000, 100, 2060, 260)
+        for f in range(400, 460):
+            tl.states[f].append(_st_(80, 21.5, 5.0))
+            boxes["sideline"][(f, 80)] = (2025, 112, 2085, 272)
+        teams = {204: "KC", 139: "KC", 84: "BAL", 40: "BAL", 198: "BAL", 1: "BAL", 74: "KC", 206: "BAL", 166: "KC", 80: "KC"}
+        rep = tlm.stand_still(tl, teams, lo=395, hi=459, bridge_m=1.5, clear_m=0.6, hold=True, hold_max=40, boxes=boxes,
+                              successor_iou=0.45, occluded_cover=0.5, newborn_iou=0.35, newborn_reach=3, lock_iou=None)
+        assert rep["ids"].get(204) == 20                                       # the pile covers his box to the window's end
+        assert all(any(s.pid == 204 for s in tl.states[f]) for f in range(440, 460))
+        assert 40 not in rep["ids"]                                            # 198's box sits on his: the man re-identified
+        assert rep["ids"].get(1) == 6                                          # held under 74's box, dropped on open turf
+        assert not any(s.pid == 1 for s in tl.states[446])
+        assert 198 not in rep["ids"]                                           # the newborn 206 on his box stops it at once
+        assert rep["ids"].get(166) == 20                                       # the old neighbour at 0.36 is another man: held on
+        assert rep["held"] == 46
+
+        # without boxes only the clearance and the cap stop a hold
+        tl2 = tlm.Timeline(frames=list(range(400, 460)), states={f: [] for f in range(400, 460)})
+        for f in range(400, 440):
+            tl2.states[f].append(_st_(1, 9.0, 9.0))
+        assert tlm.stand_still(tl2, {1: "BAL"}, lo=395, hi=459, bridge_m=1.5, hold=True, hold_max=8)["held"] == 8
+        assert tlm.stand_still(tl2, {1: "BAL"}, lo=395, hi=459, bridge_m=1.5, hold=False)["held"] == 0
+
+        # a 51-frame hole is a track that ended and came back, not an occlusion
+        tl3 = tlm.Timeline(frames=list(range(400, 460)), states={f: [] for f in range(400, 460)})
+        for f in list(range(400, 405)) + list(range(456, 460)):
+            tl3.states[f].append(_st_(166, 5.0, 5.0))
+        rep3 = tlm.stand_still(tl3, {166: "KC"}, lo=395, hi=459, bridge_m=1.5, hold=False, bridge_max_frames=50)
+        assert rep3["bridged"] == 0 and not any(s.pid == 166 for s in tl3.states[430])
+    finally:
+        _tlm_u.STAND_UNCOVERED_FRAMES = _was_u
+
+
+def test_stand_still_locked_with_an_opponent_follows_him_and_stops_when_he_breaks_free():
+    from nfl_gsplat.render import timeline as tlm
+
+    tl = tlm.Timeline(frames=list(range(400, 500)), states={f: [] for f in range(400, 500)})
+    boxes = {"sideline": {}}
+    for f in range(400, 440):
+        tl.states[f].append(_st_(204, 0.0, 0.0))                           # the centre, ends at 439
+        boxes["sideline"][(f, 204)] = (100, 100, 160, 260)
+    for f in range(400, 500):
+        x = -0.5 + 0.02 * max(0, f - 439)                                  # the Raven on him, driven back 0.02 m/frame ...
+        if f >= 470:
+            x = -0.5 + 0.02 * 30 + 0.3 * (f - 469)                         # ... then breaks free at 470 (0.3 m/frame)
+        tl.states[f].append(_st_(84, x, 0.4))
+        boxes["sideline"][(f, 84)] = (95 + max(0, f - 439) // 2, 110, 165 + max(0, f - 439) // 2, 270)   # the block creeps in the image
+    teams = {204: "KC", 84: "BAL"}
+    rep = tlm.stand_still(tl, teams, lo=395, hi=499, bridge_m=1.5, clear_m=0.6, hold=True, hold_max=25, boxes=boxes,
+                          successor_iou=0.45, occluded_cover=0.5, lock_iou=0.5, lock_max=90, lock_slow_m=0.5, lock_history=0, lock_hist_iou=0.4)
+    held = sorted(f for f in range(440, 500) if any(s.pid == 204 for s in tl.states[f]))
+    assert held[0] == 440 and 465 <= held[-1] < 480                       # follows past the static cap of 25, stops once the Raven runs
+    assert rep["locked"] == len(held) == rep["held"]
+    xy = [s.xy[:2] for s in tl.states[460] if s.pid == 204][0]
+    assert abs(float(xy[0]) - 0.02 * 21) < 1e-6 and abs(float(xy[1])) < 1e-6   # moved with the opponent, offset kept
+
+    # a same-team BODY on the spot: the man under a new id, the lock ends (a neighbour's box drifting onto the pair
+    # with his body 1.3 m off, Thuney on the centre's Raven, does not end it)
+    tl2 = tlm.Timeline(frames=list(range(400, 470)), states={f: [] for f in range(400, 470)})
+    boxes2 = {"sideline": {}}
+    for f in range(400, 440):
+        tl2.states[f].append(_st_(204, 0.0, 0.0)); boxes2["sideline"][(f, 204)] = (100, 100, 160, 260)
+    for f in range(400, 470):
+        tl2.states[f].append(_st_(84, -0.5, 0.4)); boxes2["sideline"][(f, 84)] = (95, 110, 165, 270)
+        tl2.states[f].append(_st_(139, 1.3, 0.0)); boxes2["sideline"][(f, 139)] = (98, 108, 168, 268)
+    for f in range(450, 470):
+        tl2.states[f].append(_st_(170, 0.2, 0.1)); boxes2["sideline"][(f, 170)] = (700, 108, 760, 268)
+    rep2 = tlm.stand_still(tl2, {204: "KC", 84: "BAL", 170: "KC", 139: "KC"}, lo=395, hi=469, bridge_m=1.5, hold=True, hold_max=25, boxes=boxes2,
+                           lock_iou=0.5, lock_max=90, lock_slow_m=0.5, lock_history=0, lock_hist_iou=0.4)
+    assert rep2["ids"].get(204) == 10 and not any(s.pid == 204 for s in tl2.states[450])
+
+
+def test_stand_still_lock_refuses_a_jogging_opponent_a_walk_over_gets_the_static_hold():
+    from nfl_gsplat.render import timeline as tlm
+
+    tl = tlm.Timeline(frames=list(range(400, 470)), states={f: [] for f in range(400, 470)})
+    boxes = {"sideline": {}}
+    for f in range(400, 440):
+        tl.states[f].append(_st_(1, 9.0, 9.0)); boxes["sideline"][(f, 1)] = (900, 100, 960, 260)   # a Raven, ends at 439, nobody on him before
+    for f in range(400, 470):
+        x = 400 + 12 * (f - 400)                                                                    # a tight end jogging across his spot ...
+        tl.states[f].append(_st_(74, 9.0 + 0.07 * (f - 440), 9.3)); boxes["sideline"][(f, 74)] = (x, 105, x + 60, 265)
+    rep = tlm.stand_still(tl, {1: "BAL", 74: "KC"}, lo=395, hi=469, bridge_m=1.5, hold=True, hold_max=25, boxes=boxes,
+                          lock_iou=0.5, lock_max=90, lock_slow_m=0.5, lock_history=0, lock_hist_iou=0.4)
+    assert rep["locked"] == 0                                                                       # ... moves 0.7 m per 10 frames: no block, no lock
+    assert 0 < rep["ids"].get(1, 0) < 25                                                            # the static hold, ended by open turf
+
+
+def test_vanishings_does_not_count_a_man_re_identified_under_a_newborn_id_nearby():
+    from nfl_gsplat.render import timeline as tlm
+
+    tl = tlm.Timeline(frames=list(range(400, 460)), states={f: [] for f in range(400, 460)})
+    for f in range(400, 430):
+        tl.states[f].append(_st_(40, 5.0, 5.0))                            # ends at 429 ...
+    for f in range(431, 460):
+        tl.states[f].append(_st_(198, 5.9, 5.4))                           # ... goes on as 198, born two frames later 1.0 m off
+    for f in range(400, 430):
+        tl.states[f].append(_st_(1, 9.0, 9.0))                             # ends at 429, nobody takes over
+    v = tlm.vanishings(tl, {40: "BAL", 198: "BAL", 1: "BAL"}, lo=395, hi=459, clear_m=0.6, successor_reach=3, successor_m=1.5)
+    assert v["successions"] == 1 and v["end_frames"] == 30 and v["worst"] == [(1, 430, 459, 30)]
+
+
+def test_stand_still_locks_through_a_hole_the_bridge_cannot_take_and_blends_onto_its_far_end():
+    from nfl_gsplat.render import timeline as tlm
+
+    tl = tlm.Timeline(frames=list(range(400, 500)), states={f: [] for f in range(400, 500)})
+    boxes = {"sideline": {}}
+    for f in list(range(400, 440)) + list(range(470, 500)):                 # the centre: a 30-frame hole, ends 3 m apart
+        x = 0.0 if f < 440 else 3.0
+        tl.states[f].append(_st_(204, x, 0.0)); boxes["sideline"][(f, 204)] = (100 + int(x * 20), 100, 160 + int(x * 20), 260)
+    for f in range(400, 500):                                              # the Raven on him, driven back 0.03 m/frame (slow)
+        x = -0.5 + 0.03 * max(0, f - 439)
+        tl.states[f].append(_st_(84, x, 0.4)); boxes["sideline"][(f, 84)] = (95 + int(x * 20), 110, 165 + int(x * 20), 270)
+    rep = tlm.stand_still(tl, {204: "KC", 84: "BAL"}, lo=395, hi=499, bridge_m=1.5, hold=True, hold_max=25, boxes=boxes,
+                          lock_iou=0.5, lock_max=90, lock_slow_m=0.5, lock_history=0)
+    filled = sorted(f for f in range(440, 470) if any(s.pid == 204 for s in tl.states[f]))
+    assert filled == list(range(440, 470))                                 # the hole is filled by the lock
+    assert rep["locked"] == 30 and rep["bridged"] == 0
+    last = [s.xy[:2] for s in tl.states[469] if s.pid == 204][0]
+    assert abs(float(last[0]) - 3.0) < 0.5                                 # the tail slid onto the far end (no step at 470)
+    mid = [s.xy[:2] for s in tl.states[455] if s.pid == 204][0]
+    assert 0.2 < float(mid[0]) < 1.5                                       # in between he followed the Raven, not the line
+
+
+def test_short_team_vouch_keeps_only_a_short_teams_clear_endzone_only_body():
+    import numpy as np
+    from nfl_gsplat.render import endzone_only_rule as ezr
+
+    ground = {f: {} for f in range(400, 410)}
+    views = {f: {} for f in range(400, 410)}
+    teams = {}
+    for i in range(10):                                                    # ten Ravens the sideline sees
+        teams[i] = "BAL"
+        for f in range(400, 410):
+            ground[f][i] = np.array([-30.0 + i, 0.0]); views[f][i] = ("endzone", "sideline")
+    for i in range(20, 31):                                                # eleven Chiefs
+        teams[i] = "KC"
+        for f in range(400, 410):
+            ground[f][i] = np.array([-30.0 + i, 5.0]); views[f][i] = ("sideline",)
+    teams[50] = "BAL"; teams[51] = "BAL"; teams[60] = "KC"
+    for f in range(400, 410):
+        ground[f][50] = np.array([-10.0, -6.0]); views[f][50] = ("endzone",)          # an endzone-only Raven, clear: the eleventh
+        ground[f][51] = np.array([-25.3, 0.4]); views[f][51] = ("endzone",)           # an endzone-only Raven on a drawn one: a copy
+        ground[f][60] = np.array([-40.0, 5.0]); views[f][60] = ("endzone",)           # an endzone-only Chief: KC is full
+    keep, counts = ezr.short_team_vouch(ground, views, lo=400, hi=409, teams=teams, clear_m=2.0)
+    assert counts == {50: 10} and all(keep[f] == {50} for f in range(400, 410))
+    assert ezr.short_team_vouch(ground, views, lo=400, hi=409, teams=teams, clear_m=None) == ({}, {})
+
+
+def test_stand_still_hole_lock_falls_back_to_the_static_hold_when_the_opponent_breaks_free():
+    """Inside a hole a locked man whose opponent speeds up stands where the lock left him (no KeyError on the
+    dropped opponent), and the seam still walks him onto the far end."""
+    from nfl_gsplat.render import timeline as tlm
+
+    tl = tlm.Timeline(frames=list(range(400, 500)), states={f: [] for f in range(400, 500)})
+    boxes = {"sideline": {}}
+    for f in list(range(400, 440)) + list(range(470, 500)):                 # a 30-frame hole, ends 3 m apart
+        x = 0.0 if f < 440 else 3.0
+        tl.states[f].append(_st_(204, x, 0.0)); boxes["sideline"][(f, 204)] = (100 + int(x * 20), 100, 160 + int(x * 20), 260)
+    for f in range(400, 500):                                              # the Raven on him: slow to 450, then he sprints off
+        x = -0.5 + 0.03 * max(0, f - 439) if f <= 450 else -0.5 + 0.33 + 0.4 * (f - 450)
+        tl.states[f].append(_st_(84, x, 0.4)); boxes["sideline"][(f, 84)] = (95 + int(x * 20), 110, 165 + int(x * 20), 270)
+    rep = tlm.stand_still(tl, {204: "KC", 84: "BAL"}, lo=395, hi=499, bridge_m=1.5, hold=True, hold_max=25, boxes=boxes,
+                          lock_iou=0.5, lock_max=90, lock_slow_m=0.5, lock_history=0)
+    filled = sorted(f for f in range(440, 470) if any(s.pid == 204 for s in tl.states[f]))
+    assert filled == list(range(440, 470))                                 # locked, then held, then the seam: no gap
+    assert 0 < rep["locked"] < 30 and rep["held"] == 30
+    xs = {f: float([s.xy[0] for s in tl.states[f] if s.pid == 204][0]) for f in range(440, 470)}
+    assert max(abs(xs[f] - xs[f - 1]) for f in range(441, 470)) <= 0.25    # no step anywhere in the hole
+    assert xs[458] < 2.0                                                   # after the break he is not sprinting with the Raven (at 3.5)
+    last = [s.xy[:2] for s in tl.states[469] if s.pid == 204][0]
+    assert abs(float(last[0]) - 3.0) < 0.5                                 # the seam onto the far end
+
+
+def test_stand_still_static_hold_inside_a_hole_runs_to_its_far_end():
+    """A hole the bridge cannot take (ends 3 m apart) with no opponent to lock to: the static hold fills the whole
+    hole (40 frames > STAND_HOLD_MAX 25) and the seam walks the man onto the far end."""
+    from nfl_gsplat.render import timeline as tlm
+
+    tl = tlm.Timeline(frames=list(range(400, 500)), states={f: [] for f in range(400, 500)})
+    boxes = {"sideline": {}}
+    for f in list(range(400, 440)) + list(range(480, 500)):                 # a 40-frame hole, ends 3 m apart
+        x = 0.0 if f < 440 else 3.0
+        tl.states[f].append(_st_(204, x, 0.0)); boxes["sideline"][(f, 204)] = (100 + int(x * 20), 100, 160 + int(x * 20), 260)
+    for f in range(400, 500):                                              # a teammate's box covers his last box (occluded, no lock)
+        tl.states[f].append(_st_(37, 0.0, 1.2)); boxes["sideline"][(f, 37)] = (90, 90, 170, 270)
+    rep = tlm.stand_still(tl, {204: "KC", 37: "KC"}, lo=395, hi=499, bridge_m=1.5, hold=True, hold_max=25, boxes=boxes,
+                          successor_iou=0.9, lock_iou=0.5, lock_max=90, lock_slow_m=0.5, lock_history=0)
+    filled = sorted(f for f in range(440, 480) if any(s.pid == 204 for s in tl.states[f]))
+    assert filled == list(range(440, 480)) and rep["locked"] == 0     # held to the far end, not 25 frames
+    last = [s.xy[:2] for s in tl.states[479] if s.pid == 204][0]
+    assert abs(float(last[0]) - 3.0) < 0.5                                 # the seam onto the far end
+    stood = [s.xy[:2] for s in tl.states[452] if s.pid == 204][0]
+    assert abs(float(stood[0])) < 0.1                                      # before the seam he stands where he was lost
+    xs = {f: float([s.xy[0] for s in tl.states[f] if s.pid == 204][0]) for f in range(440, 480)}
+    assert max(abs(xs[f] - xs[f - 1]) for f in range(441, 480)) <= 0.25    # the 3 m seam is a jog, not a step
+
+
+def test_stand_still_holds_the_start_of_a_hole_too_long_to_bridge():
+    """A 100-frame hole (over the cap): the man is held STAND_HOLD_MAX frames from its start, like a track's end."""
+    from nfl_gsplat.render import timeline as tlm
+
+    tl = tlm.Timeline(frames=list(range(400, 600)), states={f: [] for f in range(400, 600)})
+    boxes = {"sideline": {}}
+    for f in list(range(400, 440)) + list(range(540, 600)):
+        x = 0.0 if f < 440 else 3.0
+        tl.states[f].append(_st_(204, x, 0.0)); boxes["sideline"][(f, 204)] = (100 + int(x * 20), 100, 160 + int(x * 20), 260)
+    for f in range(400, 600):                                                        # a teammate's box covers his last box
+        tl.states[f].append(_st_(37, 0.0, 1.2)); boxes["sideline"][(f, 37)] = (90, 90, 170, 270)
+    was = tlm.STAND_LONG_HOLE_HOLD
+    tlm.STAND_LONG_HOLE_HOLD = True                   # measured neutral on play 1 (2026-09-21), kept off by default
+    try:
+        rep = tlm.stand_still(tl, {204: "KC", 37: "KC"}, lo=395, hi=599, bridge_m=1.5, hold=True, hold_max=25, boxes=boxes,
+                              successor_iou=0.9, bridge_max_frames=60, lock_iou=0.5, lock_max=90, lock_slow_m=0.5, lock_history=0)
+    finally:
+        tlm.STAND_LONG_HOLE_HOLD = was
+    held = sorted(f for f in range(440, 540) if any(s.pid == 204 for s in tl.states[f]))
+    assert held == list(range(440, 465)) and rep["held"] == 25
+
+
+def test_stand_still_hold_survives_a_short_cover_dropout():
+    """The covering box is missing for two frames mid-hold: the hold continues; missing for STAND_UNCOVERED_FRAMES
+    running, it ends there."""
+    from nfl_gsplat.render import timeline as tlm
+
+    def build(dropout):
+        tl = tlm.Timeline(frames=list(range(400, 470)), states={f: [] for f in range(400, 470)})
+        boxes = {"sideline": {}}
+        for f in range(400, 440):                                                # the man's track ends at 439
+            tl.states[f].append(_st_(204, 0.0, 0.0)); boxes["sideline"][(f, 204)] = (100, 100, 160, 260)
+        for f in range(400, 470):                                                # the opponent's box covers his last box ...
+            tl.states[f].append(_st_(84, -0.5, 0.4))
+            if f not in dropout:                                                 # ... except on these frames
+                boxes["sideline"][(f, 84)] = (90, 90, 170, 270)
+        tlm.stand_still(tl, {204: "KC", 84: "BAL"}, lo=395, hi=469, bridge_m=1.5, hold=True, hold_max=25, boxes=boxes,
+                        lock_iou=None, lock_max=90, lock_slow_m=0.5, lock_history=0)
+        return sorted(f for f in range(440, 470) if any(s.pid == 204 for s in tl.states[f]))
+
+    was = tlm.STAND_UNCOVERED_FRAMES
+    tlm.STAND_UNCOVERED_FRAMES = 3
+    try:
+        assert build({446, 447}) == list(range(440, 465))                          # a two-frame dropout: the full 25-frame hold
+        assert build({446, 447, 448}) == list(range(440, 448))                     # three running: ends on the third
+        tlm.STAND_UNCOVERED_FRAMES = 1
+        assert build({446, 447}) == list(range(440, 446))                          # the old rule: the first uncovered frame ends it
+    finally:
+        tlm.STAND_UNCOVERED_FRAMES = was
+
+
+def test_stand_still_a_drawn_neighbour_is_not_a_successor_and_a_twin_is_not_a_neighbour():
+    from nfl_gsplat.render import timeline as tlm
+
+    def build(neighbour_xy, newborn):
+        tl = tlm.Timeline(frames=list(range(400, 470)), states={f: [] for f in range(400, 470)})
+        boxes = {"sideline": {}}
+        for f in range(400, 440):                                                # the man's track ends at 439
+            tl.states[f].append(_st_(171, 0.0, 0.0)); boxes["sideline"][(f, 171)] = (100, 100, 160, 260)
+        for f in range(400, 470):                                                # a teammate drawn all along, his box on the man's
+            tl.states[f].append(_st_(28, *neighbour_xy)); boxes["sideline"][(f, 28)] = (105, 100, 165, 260)
+        if newborn:
+            for f in range(441, 470):                                            # a NEW id born on his box after his track ends
+                tl.states[f].append(_st_(55, 0.05, 0.05)); boxes["sideline"][(f, 55)] = (100, 100, 160, 260)
+        rep = tlm.stand_still(tl, {171: "BAL", 28: "BAL", 55: "BAL"}, lo=395, hi=469, bridge_m=1.5, hold=True, hold_max=25,
+                              boxes=boxes, clear_m=0.45, lock_iou=None, lock_max=90, lock_slow_m=0.5, lock_history=0)
+        return rep["ids"].get(171, 0)
+
+    was = (tlm.STAND_SUCCESSOR_NEWBORN_ONLY, tlm.STAND_NEIGHBOUR_NOT_TWIN)
+    tlm.STAND_SUCCESSOR_NEWBORN_ONLY, tlm.STAND_NEIGHBOUR_NOT_TWIN = True, True
+    try:
+        assert build((0.7, 0.0), False) == 25             # the neighbour's box on his: not a successor, the hold runs (and he is exempt from the twin veto)
+        assert build((0.7, 0.0), True) == 1               # a newborn id on his box: his new id, the hold ends at once
+        assert build((0.02, 0.0), False) == 0             # a teammate 0.02 m away is a twin, not a neighbour: the hold is vetoed
+        tlm.STAND_SUCCESSOR_NEWBORN_ONLY = False
+        assert build((0.7, 0.0), False) == 0              # the old rule: the neighbour's box reads as his successor
+    finally:
+        tlm.STAND_SUCCESSOR_NEWBORN_ONLY, tlm.STAND_NEIGHBOUR_NOT_TWIN = was
+
+
+def test_gate_low_confidence_slerps_a_bounded_low_run():
+    fk = [0, 2, 4, 6, 8]
+    vals = np.zeros((5, 21, 3))
+    vals[4, 5] = [0.0, 0.0, 1.0]                                  # row 5 turns 0 -> 1 rad about z over the span
+    vals[1, 5] = [0.9, 0, 0]; vals[2, 5] = [0, 0.9, 0]; vals[3, 5] = [0, 0, -0.9]   # the fit's garbage in between
+    conf = np.full((5, 21), np.nan)
+    conf[:, 5] = [0.9, 0.1, 0.1, 0.1, 0.9]
+    out, n = tl.gate_low_confidence(fk, vals, conf, min_conf=0.3, max_run=30)
+    assert n == 3
+    assert np.allclose(out[2, 5], [0, 0, 0.5], atol=1e-6)         # the SLERP's midpoint
+    assert np.allclose(out[1, 5], [0, 0, 0.25], atol=1e-6)
+    assert np.allclose(out[:, 4], 0.0) and np.allclose(out[[0, 4], 5], vals[[0, 4], 5])
+
+
+def test_gate_low_confidence_keeps_long_runs_edges_and_unknowns():
+    fk = list(range(0, 20, 2))                                    # 10 keyframes
+    vals = np.zeros((10, 21, 3))
+    vals[:, 3] = [0.7, 0, 0]
+    conf = np.full((10, 21), np.nan)
+    conf[:, 3] = [0.9] + [0.1] * 8 + [0.9]                        # a 16-frame run bound to bound, cap 10
+    out, n = tl.gate_low_confidence(fk, vals, conf, min_conf=0.3, max_run=10)
+    assert n == 0 and np.allclose(out, vals)
+    conf[:, 3] = [0.1, 0.1, 0.9] + [0.9] * 5 + [0.1, 0.1]         # runs at both edges: no bound on one side
+    out, n = tl.gate_low_confidence(fk, vals, conf, min_conf=0.3, max_run=30)
+    assert n == 0 and np.allclose(out, vals)
+    conf[:] = np.nan                                              # confidence unknown: never gated
+    assert tl.gate_low_confidence(fk, vals, conf, min_conf=0.3, max_run=30)[1] == 0
+    assert tl.gate_low_confidence(fk, vals, np.zeros((10, 21)), min_conf=0.3, max_run=0)[1] == 0   # off
+
+
+def test_build_timeline_gates_low_confidence_keyframes():
+    frames = list(range(0, 12))
+    ground = {f: {1: np.array([0.0, 1.0])} for f in frames}
+    up = tl.upright_from_yaw(0.0)
+    bp = {f: np.zeros((21, 3)) for f in (0, 4, 8)}
+    bp[4][17] = [0.0, -1.2, 0.0]                                  # the left elbow snapped shut on an unseen wrist
+    poses = {1: {f: (bp[f], up, np.zeros(10), "fused") for f in (0, 4, 8)}}
+    conf = {1: {0: np.full(21, 0.9), 4: np.where(np.arange(21) == 17, 0.05, 0.9), 8: np.full(21, 0.9)}}
+    kw = dict(pose_smooth=0, pose_sigma=0, clamp_joints=False, orient_sigma=0)
+    one = lambda out, f: [x for x in out.states[f] if x.pid == 1][0]
+    raw = tl.build_timeline(frames, ground, poses, **kw)
+    assert abs(one(raw, 4).body_pose[17][1] + 1.2) < 1e-6
+    gated = tl.build_timeline(frames, ground, poses, conf_by_pid=conf, conf_min=0.3, conf_max_run=30, **kw)
+    assert np.allclose(one(gated, 4).body_pose[17], 0.0, atol=1e-6) and gated.n_gated == 1
+    off = tl.build_timeline(frames, ground, poses, conf_by_pid=conf, conf_min=0.3, conf_max_run=0, **kw)
+    assert abs(one(off, 4).body_pose[17][1] + 1.2) < 1e-6 and off.n_gated == 0
+
+
+def test_drop_unboxed_poses_removes_records_without_a_row():
+    rec = (np.zeros((21, 3)), np.zeros(3), np.zeros(10), "fused")
+    poses = {9: {480: rec, 488: rec, 494: rec}, 6: {488: rec}, 77: {494: rec}}
+    boxed = {(480, 9), (494, 9), (488, 6)}                      # 9's 488 row was dropped; 77 was folded away entirely
+    out, n = tl.drop_unboxed_poses(poses, boxed)
+    assert n == 2 and sorted(out[9]) == [480, 494] and sorted(out[6]) == [488] and 77 not in out
+    assert tl.drop_unboxed_poses({}, boxed) == ({}, 0)
+
+
+def test_merged_box_frames_flags_the_tall_or_wide_rows():
+    import pandas as pd
+    rows = []
+    for f in range(10):
+        h, w = (100, 40) if f not in (4, 7) else ((150, 40) if f == 4 else (100, 80))   # 4: tall (merged), 7: wide
+        rows.append(dict(frame=f, cam="sideline", track_id=1, global_player_id=9, bbox_x1=0, bbox_y1=0, bbox_x2=w, bbox_y2=h))
+    rows += [dict(frame=f, cam="sideline", track_id=2, global_player_id=6, bbox_x1=0, bbox_y1=0, bbox_x2=40, bbox_y2=200) for f in range(3)]
+    df = pd.DataFrame(rows)
+    assert tl.merged_box_frames(df, h_ratio=1.3, w_ratio=1.6) == {(4, 9), (7, 9)}        # id 6 has too few rows for a median
+    assert tl.merged_box_frames(df[df.cam == "endzone"]) == set()
+
+
+def test_tilt_limit_follows_the_nearest_records_source():
+    frames = list(range(0, 21))
+    ground = {f: {1: np.array([0.0, 1.0])} for f in frames}
+    lean50 = (Rotation.from_euler("x", 50, degrees=True) * Rotation.from_rotvec(tl.upright_from_yaw(0.0))).as_rotvec()
+    poses = {1: {0: (np.zeros((21, 3)), lean50, np.zeros(10), "fused"),         # two views at 0: 50 deg is allowed
+                 20: (np.zeros((21, 3)), lean50, np.zeros(10), "sideline")}}    # one view at 20: clamped to 35
+    kw = dict(pose_smooth=0, pose_sigma=0, clamp_joints=False, orient_sigma=0)
+    per = tl.build_timeline(frames, ground, poses, tilt_per_frame=True, **kw)
+    whole = tl.build_timeline(frames, ground, poses, tilt_per_frame=False, **kw)
+    def tilt(out, f):
+        s = [x for x in out.states[f] if x.pid == 1][0]
+        return np.degrees(np.arccos(tl.body_up(s.global_orient)[2]))
+    assert abs(tilt(per, 0) - 50) < 1.0 and abs(tilt(per, 20) - 35) < 1.0       # the one-view frame clamps
+    assert abs(tilt(whole, 20) - 50) < 1.0                                        # the old way: the first record's source for all
+
+
+def test_a_short_fragment_whose_box_sits_inside_another_ids_box_is_a_rider_whatever_its_placement():
+    """Play 1's id 167: eight sideline boxes, 57-98 % inside the boxes of a Chiefs lineman and the Raven engaged
+    with him, placed 0.46-0.67 m from the lineman by one fit and inside 0.6 m by another -- the distance test
+    flipped on a 10 cm placement change. The boxes do not move with the fit."""
+    frames = list(range(0, 60))
+    ground = {f: {1: np.array([10.0, 0.0]), 3: np.array([10.9, 0.3]), 5: np.array([30.0, 5.0])} for f in frames}
+    for f in range(10, 60):                        # id 3 exists for 10 frames, 0.95 m from id 1: not a distance rider
+        del ground[f][3]
+    views = {f: {p: ("sideline",) for p in g} for f, g in ground.items()}
+    out = tl.build_timeline(frames, ground, {}, views_by_frame=views)
+    team = {1: "KC", 3: "KC", 5: "BAL"}
+    assert tl.rider_ids(out, team) == set()
+    boxes = {(f, 1): (100.0, 100.0, 200.0, 300.0) for f in frames}
+    boxes.update({(f, 5): (900.0, 100.0, 1000.0, 300.0) for f in frames})
+    boxes.update({(f, 3): (150.0, 120.0, 230.0, 280.0) for f in range(0, 10)})      # 62 % inside id 1's box
+    assert tl.rider_ids(out, team, boxes=boxes, box_cont=0.5) == {3}
+    assert tl.rider_ids(out, team, boxes=boxes, box_cont=0.7) == set()             # not inside enough
+    assert tl.rider_ids(out, team, boxes=boxes, box_cont=None) == set()             # the box test off
+    assert tl.rider_ids(out, {**team, 1: "BAL"}, boxes=boxes, box_cont=0.5) == {3}  # either team's box counts
+    # a box beside, not inside, the other's is two men
+    boxes.update({(f, 3): (210.0, 120.0, 290.0, 280.0) for f in range(0, 10)})
+    assert tl.rider_ids(out, team, boxes=boxes, box_cont=0.5) == set()
+
+
+def _faced(yaw_deg, source="fused"):
+    return (np.zeros((21, 3)), tl.upright_from_yaw(np.radians(yaw_deg)), np.zeros(10), source)
+
+
+def test_drop_unkeyed_poses_removes_fits_with_no_keypoints_behind_them():
+    """Play 1 v108: id 6 had 12 refit records at 578-589 with no keypoints for him in either camera (a fit carried
+    over from an old pairing); they faced away from the sideline camera, the film has his number and face toward it,
+    and the timeline turned him 345 degrees into them and out. A regressor record needs no keypoints: it stays."""
+    poses = {6: {576: _faced(-95, "sideline"), 578: _faced(90), 580: _faced(88), 590: _faced(-95, "sideline")},
+             9: {494: _faced(180), 496: _faced(180)}}
+    keyed = {(495, 9), (497, 9)}                                 # keypoints a frame off still vouch for a fit
+    out, n = tl.drop_unkeyed_poses(poses, keyed)
+    assert n == 2 and sorted(out[6]) == [576, 590] and sorted(out[9]) == [494, 496]
+    out, n = tl.drop_unkeyed_poses(poses, keyed, reach=0)
+    assert n == 4 and sorted(out[6]) == [576, 590] and 9 not in out
+    assert tl.drop_unkeyed_poses({}, keyed) == ({}, 0)
+
+
+def test_drop_flipped_keyframes_drops_the_one_record_facing_the_wrong_way():
+    """Play 1 v108 id 6 at 488: a regressor record with his back to the camera between fits facing it; the SLERP
+    turned him 276 degrees through it (film: an 80 degree turn). The record goes, its neighbours stay."""
+    poses = {1: {0: _faced(0), 4: _faced(5), 8: _faced(-5), 12: _faced(175, "sideline"), 16: _faced(0),
+                 20: _faced(10), 24: _faced(0)}}
+    out, dropped = tl.drop_flipped_keyframes(poses)
+    assert sorted(out[1]) == [0, 4, 8, 16, 20, 24] and dropped == [(1, 12)]
+
+
+def test_drop_flipped_keyframes_keeps_a_real_half_turn_and_a_spin():
+    # a clean half turn (a receiver's comeback route): records one way, then the other -- nothing goes
+    turn = {f: _faced(0 if f < 24 else 180) for f in range(0, 48, 2)}
+    # a spin move: 12 deg a frame (720 deg/s at 60 fps), a record every 2 frames
+    spin = {f: _faced((12 * f) % 360 - 180) for f in range(0, 60, 2)}
+    out, dropped = tl.drop_flipped_keyframes({2: turn, 3: spin})
+    assert dropped == [] and len(out[2]) == 24 and len(out[3]) == 30
+
+
+def test_drop_flipped_keyframes_worst_first_on_alternating_records():
+    """Play 1 v108 id 9 (the motion receiver sprinting downfield, film: facing -x throughout): fits at 494 and 504
+    faced his own end zone between regressor records facing downfield. Worst first, re-counted after each drop: the
+    backward fits go, the regressor between them stays."""
+    poses = {9: {482: _faced(148), 488: _faced(44, "sideline"), 494: _faced(20), 500: _faced(-160, "sideline"),
+                 504: _faced(-2), 506: _faced(-162, "sideline"), 512: _faced(-168, "sideline"),
+                 518: _faced(-145, "sideline")}}
+    out, dropped = tl.drop_flipped_keyframes(poses)
+    assert (9, 504) in dropped and (9, 500) not in dropped and 500 in out[9] and 506 in out[9]
+
+
+def test_drop_flipped_keyframes_needs_enough_neighbours():
+    # three records, one flipped: two neighbours are not a majority to trust -- nothing goes
+    poses = {4: {0: _faced(0), 6: _faced(180, "sideline"), 12: _faced(0)}}
+    out, dropped = tl.drop_flipped_keyframes(poses)
+    assert dropped == [] and len(out[4]) == 3
+
+
+def test_drop_detour_keyframes_drops_two_wrong_records_between_the_groups():
+    """Play 1 v109 id 12 (KC #71, facing his man throughout on the film): regressor records at 590 (-92) and 596 (+58)
+    between records at 180 and +130; each agrees with one side, so the vote keeps both, and the SLERP spun him 314
+    degrees. Without the pair the turn is 47 degrees."""
+    poses = {12: {566: _faced(-157, "sideline"), 572: _faced(179, "sideline"), 578: _faced(180, "sideline"),
+                  584: _faced(-179, "sideline"), 590: _faced(-92, "sideline"), 596: _faced(58, "sideline"),
+                  602: _faced(134, "sideline"), 608: _faced(127, "sideline"), 614: _faced(136, "sideline")}}
+    kept, flipped = tl.drop_flipped_keyframes(poses)
+    assert flipped == []                                           # the vote cannot see it
+    out, dropped = tl.drop_detour_keyframes(poses)
+    assert sorted(f for _p, f in dropped) == [590, 596] and 584 in out[12] and 602 in out[12]
+
+
+def test_drop_detour_keyframes_keeps_sparse_spins_and_half_turns():
+    # a 360 deg spin sampled every 6 frames (72 deg a record), and a half turn with one record halfway
+    spin = {6 * i: _faced(72 * i - 180, "sideline") for i in range(6)}
+    half = {0: _faced(0), 6: _faced(90), 12: _faced(180), 18: _faced(180)}
+    out, dropped = tl.drop_detour_keyframes({1: spin, 2: half})
+    assert dropped == [] and len(out[1]) == 6 and len(out[2]) == 4
+
+
+def test_drop_detour_keyframes_respects_the_span():
+    # the same wrong pair, but its neighbours 40 frames apart: a real turn could hide in a gap that long
+    poses = {3: {0: _faced(180), 10: _faced(-92), 20: _faced(58), 40: _faced(134)}}
+    out, dropped = tl.drop_detour_keyframes(poses, span=24)
+    assert dropped == []
+    out, dropped = tl.drop_detour_keyframes(poses, span=48)
+    assert sorted(f for _p, f in dropped) == [10, 20]
+
+
+def test_stand_still_bridge_blends_the_pose_across_the_hole():
+    """Play 1 (2026-09-25, the KC centre untangled): a 60-frame hole bridged in a straight line copied the start's
+    whole state into the first half and the far end's into the second -- his elbow went from 9 to 76 degrees in one
+    frame at the midpoint (hinge jerk 67 deg/frame^2). The bridge now SLERPs the body pose and the orientation."""
+    import numpy as np
+    from scipy.spatial.transform import Rotation
+
+    from nfl_gsplat.render import timeline as tlm
+
+    def st(f, elbow, yaw):
+        bp = np.zeros((21, 3)); bp[18] = [0.0, elbow, 0.0]
+        return tlm.PlayerState(pid=17, xy=np.array([0.01 * (f - 400), 0.0]), body_pose=bp,
+                               global_orient=tlm.upright_from_yaw(yaw), betas=np.zeros(10), source="sideline")
+
+    tl = tlm.Timeline(frames=list(range(400, 460)), states={f: [] for f in range(400, 460)})
+    for f in range(400, 420):
+        tl.states[f].append(st(f, 0.2, 0.0))
+    for f in range(431, 460):
+        tl.states[f].append(st(f, 1.3, np.radians(60)))
+    rep = tlm.stand_still(tl, {17: "KC"}, lo=395, hi=459, bridge_m=1.5, hold=False)
+    assert rep["bridged"] == 11
+    elbow = [next(s for s in tl.states[f] if s.pid == 17).body_pose[18][1] for f in range(419, 432)]
+    steps = np.diff(elbow)
+    assert np.all(steps > 0) and steps.max() < 0.2                       # 1.1 rad over 12 steps, no jump
+    yaw = [np.degrees(tlm.yaw_of(next(s for s in tl.states[f] if s.pid == 17).global_orient)) for f in range(419, 432)]
+    assert np.all(np.diff(yaw) > 0) and np.diff(yaw).max() < 10.0
+    tl2 = tlm.Timeline(frames=list(range(400, 460)), states={f: [] for f in range(400, 460)})
+    for f in list(range(400, 420)):
+        tl2.states[f].append(st(f, 0.2, 0.0))
+    for f in range(431, 460):
+        tl2.states[f].append(st(f, 1.3, np.radians(60)))
+    tlm.stand_still(tl2, {17: "KC"}, lo=395, hi=459, bridge_m=1.5, hold=False, blend_pose=False)
+    e2 = [next(s for s in tl2.states[f] if s.pid == 17).body_pose[18][1] for f in range(419, 432)]
+    assert max(np.diff(e2)) > 1.0                                        # the old midpoint switch, when asked for
+
+def test_endzone_pose_keys_map_clip_frames_and_track_ids_and_keep_off_other_records():
+    """The endzone cache is keyed by clip frames and endzone TRACK ids: a record maps to (clip frame - offset, the
+    tracks table's global id); one whose id has a fused or sideline record within the reach is left out; a track row
+    missing from the table maps to nothing."""
+    from nfl_gsplat.render.timeline import endzone_pose_keys
+
+    ez = {482: {136: "r1", 45: "r2"}, 488: {136: "r3"}, 500: {99: "r4"}}
+    gid = {(482, 136): 4, (482, 45): 12, (488, 136): 4}             # (500, 99) has no row
+    have = {12: [495, 496], 4: [430]}                                # id 12 has a record 2 frames from 497
+    keys = endzone_pose_keys(ez, gid, -15, have, reach=3)
+    assert sorted(keys) == [(497, 4, 482, 136), (503, 4, 488, 136)]
+    assert endzone_pose_keys(ez, gid, -15, have, reach=3, max_frame=500) == [(497, 4, 482, 136)]
+
+
+def test_endzone_only_lying_reads_the_endzone_box_only_where_the_sideline_has_none():
+    import pandas as pd
+    from nfl_gsplat.render.timeline import endzone_only_lying
+
+    rows = [("endzone", 500, 4, 0, 0, 150, 80),      # wide, no sideline box of 4 at 500: on the ground
+            ("endzone", 501, 7, 0, 0, 150, 80),      # wide, but the sideline boxes 7 at 501: a merged box, not lying
+            ("sideline", 501, 7, 0, 0, 60, 180),
+            ("endzone", 502, 4, 0, 0, 60, 180)]      # tall: standing
+    df = pd.DataFrame(rows, columns=["cam", "frame", "global_player_id", "bbox_x1", "bbox_y1", "bbox_x2", "bbox_y2"])
+    df["track_id"] = 1
+    assert endzone_only_lying(df, aspect=0.7) == {(500, 4)}
+
+
+def test_smooth_xy_along_the_sideline_ray_takes_the_longer_window():
+    """Play 1 (2026-09-25): the sideline camera places depth from a box bottom (0.2-1 m per frame along its line of
+    sight), and the 9-frame average left 17 % of live body-frames accelerating past 25 m/s^2 across the field. The
+    component along the ray from the camera's ground position is averaged over ``along_window``; across it, the
+    shipped ``window``. Without a centre, or with along_window <= window, the result is the old one exactly."""
+    rng = np.random.default_rng(3)
+    n = 61
+    centre = np.array([-3.7, -101.6])
+    base = np.array([-20.0, 0.0])
+    u = (base - centre) / np.linalg.norm(base - centre)
+    v = np.array([-u[1], u[0]])
+    t = np.arange(n)
+    xy = base + np.outer(0.05 * t, v) + np.outer(rng.choice([-0.3, 0.3], n), u)   # walks across, noisy along
+    old = tl.smooth_xy(xy, window=9)
+    assert np.allclose(tl.smooth_xy(xy, window=9, along_window=9, centre=centre), old, atol=1e-12)
+    assert np.allclose(tl.smooth_xy(xy, window=9, along_window=31, centre=None), old)
+    new = tl.smooth_xy(xy, window=9, along_window=31, centre=centre)
+    mid = slice(15, n - 15)
+    along_old = (old[mid] - base) @ u
+    along_new = (new[mid] - base) @ u
+    assert np.std(along_new) < 0.5 * np.std(along_old)                 # the depth noise averaged down
+    across_new = (new[mid] - base) @ v
+    assert np.allclose(across_new, 0.05 * t[mid], atol=0.02)           # the walk across the ray kept

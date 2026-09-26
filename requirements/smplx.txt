@@ -1,0 +1,21 @@
+# The SMPL-X environment (PY_SMPLX): SMPLest-X, the SMPL-X fits, the timeline, the renders, the rulers, the exports.
+# NumPy 1: the pose caches are NumPy-1 pickles and only this environment writes them. Versions as used for the
+# published results (Python 3.12). Install PyTorch's CUDA build for your driver first (cu128 was used).
+numpy==1.26.4
+scipy==1.17.1
+pandas==3.0.5
+pyarrow==25.0.1
+opencv-python==4.11.0.86
+pillow==12.3.0
+imageio==2.37.4
+imageio-ffmpeg==0.6.0
+torch==2.11.0
+torchvision==0.26.0
+smplx==0.1.28
+ultralytics==8.4.135
+rich==15.0.0
+pytest==9.1.1
+# SMPLest-X's own dependencies
+timm==1.0.29
+einops==0.8.2
+trimesh==5.0.0

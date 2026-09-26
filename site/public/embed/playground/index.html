@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play 001 Film Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #14161a;
+    --panel: #1d2126;
+    --panel-2: #262b31;
+    --line: #353b42;
+    --chalk: #e9e4d6;
+    --chalk-dim: #a9a397;
+    --accent: #f2c14e;
+    --kc: #e31837;
+    --bal: #f5f3ee;
+    --bal-trim: #2a1a6e;
+    --turf: #2d6a35;
+    --display: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    --body: "Barlow", "Helvetica Neue", Arial, sans-serif;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--ground); color: var(--chalk);
+    font-family: var(--body); font-size: 14px; overflow: hidden;
+    font-variant-numeric: tabular-nums;
+  }
+  #stage { position: absolute; inset: 0; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  .bar {
+    position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 14px;
+    padding: 8px 16px; background: color-mix(in srgb, var(--panel) 88%, transparent);
+    backdrop-filter: blur(6px); border-color: var(--line); border-style: solid; border-width: 0;
+    flex-wrap: wrap;
+  }
+  #top { top: 0; padding-top: calc(8px + env(safe-area-inset-top, 0px)); border-bottom-width: 1px; }
+  #bottom { bottom: 0; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); border-top-width: 1px; }
+  h1 {
+    font-family: var(--display); font-weight: 700; font-size: 22px; letter-spacing: 0.02em;
+    margin: 0; text-transform: uppercase; line-height: 1;
+  }
+  h1 small { font-family: var(--body); font-weight: 500; font-size: 12px; color: var(--chalk-dim); letter-spacing: 0.08em; text-transform: uppercase; margin-left: 10px; }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  button {
+    font: 600 12px var(--body); letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--chalk); background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px;
+    padding: 6px 10px; cursor: pointer;
+  }
+  button:hover { border-color: var(--chalk-dim); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button[aria-pressed="true"] { background: var(--accent); color: #1a1408; border-color: var(--accent); }
+  #play { min-width: 74px; }
+  .counter { font-family: var(--display); font-size: 26px; font-weight: 600; min-width: 92px; line-height: 1; }
+  .counter span { font-size: 12px; color: var(--chalk-dim); font-family: var(--body); font-weight: 500; letter-spacing: 0.08em; display: block; text-transform: uppercase; }
+  .scrub { flex: 1 1 260px; position: relative; height: 34px; display: flex; align-items: center; }
+  .scrub input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); cursor: pointer; }
+  .marks { position: absolute; left: 0; right: 0; top: 0; height: 12px; pointer-events: none; }
+  .mark { position: absolute; top: 0; transform: translateX(-50%); font: 500 10px var(--body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--chalk-dim); white-space: nowrap; }
+  .mark::after { content: ""; display: block; width: 1px; height: 6px; background: var(--chalk-dim); margin: 1px auto 0; }
+  .speed { display: flex; gap: 4px; }
+  #hud {
+    position: absolute; left: 16px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); padding: 8px 10px;
+    background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--line); border-radius: 3px;
+    font-size: 12px; color: var(--chalk-dim); max-width: 260px; line-height: 1.45;
+  }
+  #hud b { color: var(--chalk); font-weight: 600; }
+  #pick { color: var(--accent); font-weight: 600; }
+  .legend { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  [hidden] { display: none !important; }       /* the page's own rule: standalone pages have no shell to supply it */
+  #status { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--display); font-size: 28px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--chalk-dim); pointer-events: none; }
+  @media (max-width: 640px) {
+    h1 small { display: none; }
+    .counter { font-size: 20px; min-width: 70px; }
+    #hud { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .bar { backdrop-filter: none; } }
+</style>
+</head>
+<body>
+
+<div id="stage"></div>
+<div id="status">Loading the play…</div>
+
+<div id="top" class="bar">
+  <h1>Play 001 Film Room <small>BAL at KC · 2024 wk 1</small></h1>
+  <div class="presets" role="group" aria-label="Camera">
+    <button data-cam="sideline" aria-pressed="true">Sideline</button>
+    <button data-cam="endzone" aria-pressed="false">Endzone</button>
+    <button data-cam="overhead" aria-pressed="false">Overhead</button>
+    <button data-cam="pocket" aria-pressed="false">Pocket</button>
+    <button data-cam="ball" aria-pressed="false">Follow ball</button>
+    <button data-cam="real:sideline" aria-pressed="false" title="the broadcast sideline camera's solved pose, frame by frame">Sideline cam</button>
+    <button data-cam="real:endzone" aria-pressed="false" title="the broadcast endzone camera's solved pose, frame by frame">Endzone cam</button>
+    <button data-cam="fpv" aria-pressed="false" title="click a body first: the play through his eyes">First person</button>
+  </div>
+</div>
+
+<div id="hud">
+  <span class="legend"><span class="swatch" style="background: var(--kc)"></span>Kansas City</span>
+  <span class="legend"><span class="swatch" style="background: var(--bal); outline: 1px solid var(--bal-trim)"></span>Baltimore</span><br>
+  Drag to orbit · wheel to zoom · right-drag or shift-drag to pan · click a body for its id, then First person to watch through his eyes · the two cam presets are the broadcast cameras' solved poses<br>
+  <span id="pick">—</span>
+</div>
+
+<div id="bottom" class="bar">
+  <button id="play" aria-pressed="false">Play</button>
+  <div class="counter"><span>frame</span><span id="frame" style="font-size: inherit; color: inherit; font-family: inherit; display: inline">—</span></div>
+  <div class="scrub">
+    <div class="marks" id="marks"></div>
+    <input id="scrub" type="range" min="0" max="1" step="1" value="0" aria-label="Frame">
+  </div>
+  <div class="speed" role="group" aria-label="Speed">
+    <button data-speed="0.25" aria-pressed="false">¼×</button>
+    <button data-speed="0.5" aria-pressed="false">½×</button>
+    <button data-speed="1" aria-pressed="true">1×</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+  // ---- the play's marks (read off the film, ball.json) ----
+  const EVENTS = { snap: 395, release: 530, catch: 562, down: 607 };
+  const LOS_X = -24.11;            // line of scrimmage, metres along the field (x), Kansas City's side is x > LOS
+  const GOAL = 45.72, HALF_W = 24.38, ENDZONE = 9.144;
+
+  const stage = document.getElementById("stage");
+  const status = document.getElementById("status");
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  stage.appendChild(renderer.domElement);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0b0e18);      // a night game: dark sky over the bowl
+  scene.fog = new THREE.Fog(0x0b0e18, 140, 320);
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 600);
+  camera.up.set(0, 0, 1);            // the field frame: x along, y across, z up
+
+  // ---- light: the render's stadium key light (render.shade KEY_LIGHT), high over the near sideline, with shadows ----
+  const KEY_DIR = new THREE.Vector3(0.30, -0.55, 0.78).normalize();
+  const key = new THREE.DirectionalLight(0xfff3dd, 1.2);
+  key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048);
+  Object.assign(key.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 10, far: 220 });
+  key.shadow.bias = -0.0004;
+  key.shadow.normalBias = 0.03;
+  scene.add(key); scene.add(key.target);
+  function aimKey(x, y) {                     // the shadow box follows the play
+    key.target.position.set(x, y, 0);
+    key.position.copy(key.target.position).addScaledVector(KEY_DIR, 110);
+    key.target.updateMatrixWorld();
+  }
+  aimKey(LOS_X, 0);
+  scene.add(new THREE.HemisphereLight(0xe6ecf5, 0x27432b, 0.62));
+  const fill = new THREE.DirectionalLight(0xc6d4ff, 0.28);
+  fill.position.set(-50, 70, 45);
+  scene.add(fill);
+
+  // ---- the field ----
+  function fieldTexture() {
+    const W = 2048, H = 1024;                 // 140 yd x 70 yd of canvas: the field plus a border
+    const c = document.createElement("canvas"); c.width = W; c.height = H;
+    const g = c.getContext("2d");
+    const mx = W / (2 * (GOAL + ENDZONE + 6.0)), my = H / (2 * (HALF_W + 6.0));   // px per metre
+    const X = x => W / 2 + x * mx, Y = y => H / 2 - y * my;
+    g.fillStyle = "#245a2c"; g.fillRect(0, 0, W, H);
+    // the turf, 5 yd stripes
+    for (let i = -12; i < 12; i++) {
+      g.fillStyle = i % 2 ? "#2d6a35" : "#31723a";
+      g.fillRect(X(i * 4.572), Y(HALF_W), 4.572 * mx, 2 * HALF_W * my);
+    }
+    g.fillStyle = "#274f2b";                 // end zones
+    g.fillRect(X(-GOAL - ENDZONE), Y(HALF_W), ENDZONE * mx, 2 * HALF_W * my);
+    g.fillRect(X(GOAL), Y(HALF_W), ENDZONE * mx, 2 * HALF_W * my);
+    g.strokeStyle = "#f3efe4"; g.lineWidth = 3;
+    g.strokeRect(X(-GOAL - ENDZONE), Y(HALF_W), 2 * (GOAL + ENDZONE) * mx, 2 * HALF_W * my);
+    for (let yd = -50; yd <= 50; yd += 5) {  // yard lines, goal lines heavier
+      const x = yd * 0.9144;
+      g.lineWidth = Math.abs(yd) === 50 ? 5 : 2;
+      g.beginPath(); g.moveTo(X(x), Y(HALF_W)); g.lineTo(X(x), Y(-HALF_W)); g.stroke();
+    }
+    g.lineWidth = 2;                         // hash marks: 60 cm ticks 3.124 m either side of midfield, every yard
+    for (let yd = -49; yd <= 49; yd++) {
+      const x = yd * 0.9144;
+      for (const s of [-1, 1]) {
+        const y0 = s * 3.124;
+        g.beginPath(); g.moveTo(X(x), Y(y0 - 0.3)); g.lineTo(X(x), Y(y0 + 0.3)); g.stroke();
+        g.beginPath(); g.moveTo(X(x), Y(s * (HALF_W - 0.6))); g.lineTo(X(x), Y(s * HALF_W)); g.stroke();
+      }
+    }
+    g.fillStyle = "#f3efe4"; g.font = `700 ${Math.round(2.0 * my)}px "Barlow Condensed", Impact, sans-serif`;
+    g.textAlign = "center"; g.textBaseline = "middle";
+    for (let yd = -40; yd <= 40; yd += 10) {   // the numerals, 12.5 m from midfield, read from each sideline
+      const n = String(50 - Math.abs(yd)).padStart(2, "0");
+      for (const s of [-1, 1]) {
+        g.save(); g.translate(X(yd * 0.9144), Y(s * 12.5)); g.rotate(s < 0 ? 0 : Math.PI); g.fillText(n, 0, 0); g.restore();
+      }
+    }
+    g.strokeStyle = "#f2c14e"; g.lineWidth = 4;   // the line of scrimmage
+    g.beginPath(); g.moveTo(X(LOS_X), Y(HALF_W)); g.lineTo(X(LOS_X), Y(-HALF_W)); g.stroke();
+    const t = new THREE.CanvasTexture(c); t.anisotropy = 8; t.encoding = THREE.sRGBEncoding;
+    return { t, w: W / mx, h: H / my };
+  }
+  const ft = fieldTexture();
+  const field = new THREE.Mesh(new THREE.PlaneGeometry(ft.w, ft.h), new THREE.MeshLambertMaterial({ map: ft.t }));
+  field.receiveShadow = true;
+  scene.add(field);
+
+  // ---- the stadium: turf apron, a wall, and sloped stands with the home crowd in red and white ----
+  function crowdTexture() {
+    // seated spectators, as the hi-fi render's bowl (render.sky): 0.5 m seats, 1 m rows, a shirt and a head over each
+    // row's dark step, empty seats, rows staggered, an aisle every 18 seats. Canvas up = up the bank.
+    const W = 1024, H = 512, SEAT = 8, ROW = 16;
+    const c = document.createElement("canvas"); c.width = W; c.height = H;
+    const g = c.getContext("2d");
+    const shirts = ["#7a0f1a", "#a3172a", "#c9c3b8", "#3a3438", "#1d1c22", "#8a6a50"];
+    const wts = [0.30, 0.17, 0.10, 0.18, 0.15, 0.10];
+    const heads = ["#8c6a52", "#5e3e2c", "#34241c", "#9e1a24", "#d8d4cc"];
+    let seed = 12345;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    g.fillStyle = "#1a0709"; g.fillRect(0, 0, W, H);                       // the red seats behind everyone
+    for (let y = 0; y < H; y += ROW) {
+      const shift = Math.floor(rnd() * SEAT);
+      for (let x = -SEAT; x < W; x += SEAT) {
+        const sx = x + shift, col = Math.floor((sx + SEAT) / SEAT);
+        if (col % 18 === 0) { g.fillStyle = "#0b0a0e"; g.fillRect(sx, y, SEAT, ROW); continue; }   // an aisle
+        if (rnd() > 0.93) continue;                                          // an empty seat
+        let u = rnd(), k = 0;
+        while (k < wts.length - 1 && u > wts[k]) { u -= wts[k]; k++; }
+        g.fillStyle = shirts[k]; g.fillRect(sx + 1, y + 4, SEAT - 2, 7);   // the shirt
+        g.fillStyle = heads[Math.floor(rnd() * heads.length)]; g.fillRect(sx + 3, y + 1, 2, 3);   // the head
+      }
+      g.fillStyle = "#0b0a0e"; g.fillRect(0, y + 12, W, ROW - 12);          // the row's step
+    }
+    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = 4;
+    return t;
+  }
+  const APRON = 8.0, WALL_H = 1.3, RISE = 26.0, DEPTH = 42.0;
+  const apron = new THREE.Mesh(new THREE.PlaneGeometry(2 * (GOAL + ENDZONE + APRON + 2), 2 * (HALF_W + APRON + 2)),
+                               new THREE.MeshLambertMaterial({ color: 0x1d3f22 }));
+  apron.position.z = -0.02; scene.add(apron);
+  const wallMat = new THREE.MeshLambertMaterial({ color: 0x0c0d14, side: THREE.DoubleSide });
+  // flip: the bank's plane runs DOWN the slope on the near sideline and behind the +x end zone, so the texture
+  // is turned half a turn there to keep the spectators upright
+  const standMat = (rx, ry, flip) => { const t = crowdTexture(); t.repeat.set(rx, ry);
+    if (flip) { t.center.set(0.5, 0.5); t.rotation = Math.PI; }
+    return new THREE.MeshLambertMaterial({ map: t, side: THREE.DoubleSide }); };
+  function standSide(len, inner, axis, sign) {
+    // a wall at `inner` metres from the centre line, then a bank of seats rising outward to RISE m over DEPTH m
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(len, WALL_H), wallMat);
+    const slope = Math.hypot(DEPTH, RISE);
+    const flip = (axis === "y" && sign < 0) || (axis === "x" && sign > 0);
+    const bank = new THREE.Mesh(new THREE.PlaneGeometry(len, slope), standMat(len / 64, slope / 32, flip));   // 0.5 m seats, 1 m rows
+    const tilt = Math.atan2(RISE, DEPTH);
+    if (axis === "y") {        // along the sidelines
+      wall.rotation.x = Math.PI / 2; wall.position.set(0, sign * inner, WALL_H / 2);
+      bank.rotation.x = sign > 0 ? tilt : -tilt;
+      bank.position.set(0, sign * (inner + DEPTH / 2), WALL_H + RISE / 2);
+    } else {                   // behind the end zones
+      wall.rotation.y = Math.PI / 2; wall.rotation.z = Math.PI / 2; wall.position.set(sign * inner, 0, WALL_H / 2);
+      bank.rotation.set(0, sign > 0 ? -tilt : tilt, Math.PI / 2);
+      bank.position.set(sign * (inner + DEPTH / 2), 0, WALL_H + RISE / 2);
+    }
+    scene.add(wall); scene.add(bank);
+  }
+  const sideLen = 2 * (GOAL + ENDZONE + APRON), endLen = 2 * (HALF_W + APRON);
+  standSide(sideLen, HALF_W + APRON, "y", 1); standSide(sideLen, HALF_W + APRON, "y", -1);
+  standSide(endLen, GOAL + ENDZONE + APRON, "x", 1); standSide(endLen, GOAL + ENDZONE + APRON, "x", -1);
+
+  // ---- players: styled mannequins on the SMPL-X body tree ----
+  // The exported joints drive low-poly players dressed the way the render dresses its SMPL-X bodies (render.uniform,
+  // render.helmet): tapered limbs, a jersey over shoulder pads with the number front and back, the film's pants,
+  // socks and cleats, a glossy helmet whose facemask turns where the player looks (the export's look, render.gaze).
+  // Only the joints ship -- no SMPL-X geometry -- so the page can go wherever the videos go.
+  const V3 = THREE.Vector3;
+  const lin = (r, g, b) => new THREE.Color().setRGB(r, g, b).convertSRGBToLinear();
+  const mat = (c, rough = 0.72, metal = 0.0) => new THREE.MeshStandardMaterial({ color: c, roughness: rough, metalness: metal });
+  const SKIN = mat(lin(0.55, 0.37, 0.27), 0.8);
+  const kit = (k) => ({ jersey: mat(k.jersey), pants: mat(k.pants), socks: mat(k.socks), shoes: mat(k.shoes, 0.5),
+                        gloves: mat(k.gloves, 0.6), helmet: mat(k.helmet, 0.26, 0.25), mask: mat(k.mask, 0.4, 0.55),
+                        skin: SKIN, number: k.number, edge: k.edge });
+  const KIT = {    // render.uniform KITS and render.helmet colours (sRGB), as the film shows them
+    KC:  kit({ jersey: lin(0.89, 0.09, 0.22), pants: lin(0.94, 0.94, 0.94), socks: lin(0.89, 0.09, 0.22), shoes: lin(0.90, 0.90, 0.90),
+               gloves: lin(0.94, 0.94, 0.94), helmet: lin(0.89, 0.09, 0.22), mask: lin(0.88, 0.88, 0.88), number: "#fafafa", edge: "#e8b923" }),
+    BAL: kit({ jersey: lin(0.95, 0.95, 0.95), pants: lin(0.94, 0.94, 0.94), socks: lin(0.94, 0.94, 0.94), shoes: lin(0.08, 0.08, 0.09),
+               gloves: lin(0.09, 0.09, 0.11), helmet: lin(0.08, 0.08, 0.10), mask: lin(0.12, 0.12, 0.14), number: "#2b1c5c", edge: "#111114" }),
+    "":  kit({ jersey: lin(0.55, 0.57, 0.60), pants: lin(0.80, 0.80, 0.80), socks: lin(0.55, 0.57, 0.60), shoes: lin(0.20, 0.20, 0.20),
+               gloves: lin(0.30, 0.30, 0.30), helmet: lin(0.70, 0.70, 0.72), mask: lin(0.35, 0.35, 0.35), number: "#222222", edge: "#888888" }),
+  };
+  function limb(rParent, rChild) {            // unit length along +z, the child's end at +z (lookAt the child)
+    const g = new THREE.CylinderGeometry(rChild, rParent, 1, 14, 1, false);
+    g.rotateX(Math.PI / 2);
+    return g;
+  }
+  // child joint -> [geometry, kit region]; the spine, collars and hip bones sit inside the torso shapes
+  const LIMB = {
+    4: [limb(0.098, 0.068), "pants"], 5: [limb(0.098, 0.068), "pants"],       // thighs
+    7: [limb(0.066, 0.046), "socks"], 8: [limb(0.066, 0.046), "socks"],       // shins
+    10: [limb(0.048, 0.042), "shoes"], 11: [limb(0.048, 0.042), "shoes"],     // feet
+    18: [limb(0.064, 0.050), "jersey"], 19: [limb(0.064, 0.050), "jersey"],   // sleeves over the upper arms
+    20: [limb(0.047, 0.037), "skin"], 21: [limb(0.047, 0.037), "skin"],       // forearms
+    12: [limb(0.064, 0.060), "skin"], 15: [limb(0.060, 0.055), "skin"],       // the neck
+  };
+  const KNOB = { 4: [0.071, "pants"], 5: [0.071, "pants"], 7: [0.048, "socks"], 8: [0.048, "socks"], 10: [0.05, "shoes"],
+                 11: [0.05, "shoes"], 18: [0.053, "jersey"], 19: [0.053, "jersey"], 20: [0.057, "gloves"], 21: [0.057, "gloves"] };
+  const ELL = new THREE.SphereGeometry(1, 24, 16);
+  const SPH = new THREE.SphereGeometry(1, 14, 10);
+  // numbers: canvas numerals on planes baked to face the torso's front (+y) and back (-y), up along +z
+  const NUM_W = 0.23, NUM_H = 0.21;
+  const numFront = new THREE.PlaneGeometry(NUM_W, NUM_H); numFront.rotateX(Math.PI / 2); numFront.rotateZ(Math.PI);
+  const numBack = new THREE.PlaneGeometry(NUM_W, NUM_H); numBack.rotateX(Math.PI / 2);
+  const numMats = new Map();
+  function numberMat(team, n) {
+    const key = `${team}:${n}`;
+    if (numMats.has(key)) return numMats.get(key);
+    const k = KIT[team] || KIT[""];
+    const c = document.createElement("canvas"); c.width = 128; c.height = 128;
+    const g = c.getContext("2d");
+    g.font = '700 108px "Barlow Condensed", Impact, "Arial Narrow", sans-serif';
+    g.textAlign = "center"; g.textBaseline = "middle";
+    g.lineJoin = "round"; g.lineWidth = 9; g.strokeStyle = k.edge; g.strokeText(n, 64, 70);
+    g.fillStyle = k.number; g.fillText(n, 64, 70);
+    const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; t.anisotropy = 4;
+    const m = new THREE.MeshStandardMaterial({ map: t, transparent: true, alphaTest: 0.4, roughness: 0.7,
+                                               polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    numMats.set(key, m);
+    return m;
+  }
+  function numberOf(pid) {
+    const n = data && data.names && data.names[String(pid)];
+    const m = n && /^(\d{1,2})\b/.exec(n);
+    return m ? m[1] : null;
+  }
+  // a facemask: three bars wrapped around the front of the face and a centre post, in the helmet's own frame
+  const MASK_BARS = [-0.062, -0.028, 0.006].map(z => {
+    const g = new THREE.TorusGeometry(0.128, 0.0075, 6, 22, 2.1);
+    g.rotateZ(Math.PI / 2 - 1.05); g.translate(0, 0.045, z);
+    return g;
+  });
+  const MASK_POST = new THREE.CylinderGeometry(0.0075, 0.0075, 0.085, 6); MASK_POST.rotateX(Math.PI / 2); MASK_POST.translate(0, 0.172, -0.028);
+  const bodies = new Map();                   // pid -> the body's meshes
+  let parents = null;
+
+  function makeBody(pid, team) {
+    const k = KIT[team] || KIT[""];
+    const group = new THREE.Group();
+    const add = (parent, geom, m, shadow = true) => {
+      const o = new THREE.Mesh(geom, m); o.castShadow = shadow; o.userData.pid = pid; parent.add(o); return o;
+    };
+    const limbs = {};
+    for (const [j, [geom, region]] of Object.entries(LIMB)) limbs[j] = add(group, geom, k[region]);
+    const knobs = {};
+    for (const [j, [r, region]] of Object.entries(KNOB)) { const o = add(group, SPH, k[region]); o.scale.setScalar(r); knobs[j] = o; }
+    const torso = new THREE.Group(); group.add(torso);
+    const chest = add(torso, ELL, k.jersey), pads = add(torso, ELL, k.jersey);
+    const belly = add(group, ELL, k.jersey), hips = add(group, ELL, k.pants);
+    const n = numberOf(pid);
+    const front = n ? add(torso, numFront, numberMat(team, n), false) : null;
+    const back = n ? add(torso, numBack, numberMat(team, n), false) : null;
+    const head = new THREE.Group(); group.add(head);
+    const shell = add(head, ELL, k.helmet); shell.scale.set(0.126, 0.142, 0.132);
+    for (const g of MASK_BARS) add(head, g, k.mask, false);
+    add(head, MASK_POST, k.mask, false);
+    scene.add(group);
+    return { group, team, limbs, knobs, torso, chest, pads, belly, hips, front, back, head };
+  }
+
+  const tA = new V3(), tB = new V3(), tM = new V3(), tUp = new V3(), tRt = new V3(), tFw = new V3();
+  const tHU = new V3(), tHF = new V3(), tHR = new V3();
+  const P0 = new V3(), S1 = new V3(), S2 = new V3(), N12 = new V3(), H15 = new V3(), LSh = new V3(), RSh = new V3(), LHp = new V3(), RHp = new V3();
+  const tMat = new THREE.Matrix4(), tQ = new THREE.Quaternion(), tQH = new THREE.Quaternion();
+  const vj = (J, i, out) => out.set(J[i][0], J[i][1], J[i][2]);
+  function poseBody(b, J, look) {
+    for (const [j, m] of Object.entries(b.limbs)) {
+      const jj = +j;
+      vj(J, parents[jj], tA); vj(J, jj, tB);
+      const len = tA.distanceTo(tB);
+      m.position.addVectors(tA, tB).multiplyScalar(0.5); m.lookAt(tB); m.scale.set(1, 1, Math.max(0.02, len + 0.03));
+    }
+    for (const [j, o] of Object.entries(b.knobs)) vj(J, +j, o.position);
+    vj(J, 0, P0); vj(J, 3, S1); vj(J, 6, S2); vj(J, 12, N12); vj(J, 15, H15);
+    vj(J, 16, LSh); vj(J, 17, RSh); vj(J, 1, LHp); vj(J, 2, RHp);
+    // the torso's frame, right-handed: x = the player's right, y = where his chest faces, z = up his spine
+    tUp.subVectors(N12, P0).normalize();
+    tRt.subVectors(RSh, LSh); tRt.addScaledVector(tUp, -tRt.dot(tUp));
+    if (tRt.lengthSq() < 1e-8) tRt.set(1, 0, 0);
+    tRt.normalize();
+    tFw.crossVectors(tUp, tRt).normalize();
+    tMat.makeBasis(tRt, tFw, tUp); tQ.setFromRotationMatrix(tMat);
+    const shW = LSh.distanceTo(RSh), hipW = LHp.distanceTo(RHp), chestH = Math.max(0.12, N12.distanceTo(S2));
+    b.torso.position.copy(S2).lerp(N12, 0.45).addScaledVector(tFw, 0.01);
+    b.torso.quaternion.copy(tQ);
+    b.chest.scale.set(shW / 2 + 0.07, 0.13, chestH * 0.72);
+    b.pads.position.set(0, -0.004, chestH * 0.33);
+    b.pads.scale.set(shW / 2 + 0.1, 0.142, 0.12);
+    if (b.front) { b.front.position.set(0, 0.139, chestH * 0.0); b.back.position.set(0, -0.139, chestH * 0.06); }
+    b.belly.position.copy(S1).lerp(S2, 0.5); b.belly.quaternion.copy(tQ);
+    b.belly.scale.set(hipW / 2 + 0.08, 0.12, Math.max(0.1, S1.distanceTo(S2) * 1.15));
+    b.hips.position.copy(P0).lerp(S1, 0.25).addScaledVector(tUp, -0.03); b.hips.quaternion.copy(tQ);
+    b.hips.scale.set(hipW / 2 + 0.09, 0.125, 0.15);
+    // the helmet rides up the neck and faces where he looks (else where his chest faces)
+    tHU.subVectors(H15, N12);
+    if (tHU.lengthSq() < 1e-8) tHU.copy(tUp);
+    tHU.normalize();
+    if (look) tHF.set(look[0], look[1], look[2]); else tHF.copy(tFw);
+    tHF.addScaledVector(tHU, -tHF.dot(tHU));
+    if (tHF.lengthSq() < 1e-6) tHF.copy(tFw).addScaledVector(tHU, -tFw.dot(tHU));
+    tHF.normalize();
+    tHR.crossVectors(tHF, tHU).normalize();
+    tMat.makeBasis(tHR, tHF, tHU); tQH.setFromRotationMatrix(tMat);
+    b.head.position.copy(H15).addScaledVector(tHU, 0.085);
+    b.head.quaternion.copy(tQH);
+  }
+
+  // ---- the ball ----
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshLambertMaterial({ color: 0x7a3f1d }));
+  ball.scale.set(0.14, 0.09, 0.09); ball.visible = false; scene.add(ball);
+
+  // ---- camera: presets and a simple orbit ----
+  const orbit = { target: new THREE.Vector3(LOS_X, 0, 1.0), r: 34, theta: -Math.PI / 2, phi: 0.98, follow: false };
+  function applyOrbit() {
+    const t = orbit.target;
+    camera.position.set(t.x + orbit.r * Math.sin(orbit.phi) * Math.cos(orbit.theta),
+                        t.y + orbit.r * Math.sin(orbit.phi) * Math.sin(orbit.theta),
+                        t.z + orbit.r * Math.cos(orbit.phi));
+    camera.lookAt(t);
+  }
+  const PRESETS = {
+    sideline: { theta: -Math.PI / 2, phi: 1.05, r: 42, target: [LOS_X + 4, 0, 1] },   // the broadcast side, y < 0
+    endzone:  { theta: Math.PI, phi: 1.15, r: 40, target: [LOS_X + 2, 0, 1] },        // from behind the defence
+    overhead: { theta: -Math.PI / 2, phi: 0.05, r: 52, target: [LOS_X + 4, 0, 0] },
+    pocket:   { theta: -2.2, phi: 1.2, r: 16, target: [LOS_X + 3, -0.5, 1] },
+    ball:     { theta: -1.9, phi: 1.1, r: 20, follow: true },
+  };
+  // ---- the real broadcast cameras: OpenCV world-to-camera (R, t), x right, y down, z forward ----
+  let realCam = null;                // "sideline" | "endzone" | null
+  const _R = new THREE.Matrix4(), _flip = new THREE.Matrix4().makeScale(1, -1, -1);
+  function applyRealCam(f) {
+    const c = data && data.cameras && data.cameras[realCam] && data.cameras[realCam][String(f)];
+    if (!c) return false;
+    const [fx, fy, cx, cy] = c.K; const R = c.R, t = c.t; const H = (c.wh && c.wh[1]) || 1080;
+    // camera centre C = -R^T t; the camera's world rotation is R^T with three.js's axes (looks down -z, +y up)
+    _R.set(R[0], R[1], R[2], 0, R[3], R[4], R[5], 0, R[6], R[7], R[8], 0, 0, 0, 0, 1);
+    const Rt = _R.clone().transpose();
+    const C = new THREE.Vector3(t[0], t[1], t[2]).applyMatrix4(Rt).multiplyScalar(-1);
+    const M = Rt.multiply(_flip); M.setPosition(C);
+    camera.matrixAutoUpdate = false; camera.matrix.copy(M); camera.matrixWorld.copy(M); camera.matrixWorldNeedsUpdate = true;
+    camera.fov = 2 * Math.atan(H / (2 * fy)) * 180 / Math.PI; camera.updateProjectionMatrix();
+    return true;
+  }
+  function leaveRealCam() {
+    if (!realCam) return;
+    realCam = null; camera.matrixAutoUpdate = true; camera.fov = 50; camera.updateProjectionMatrix();
+  }
+  // ---- first person: the eyes of a picked body ----
+  let picked = null, fpv = null;
+  const fpvFwd = new THREE.Vector3(), _eye = new THREE.Vector3(), _right = new THREE.Vector3(), _fwd = new THREE.Vector3(), _look = new THREE.Vector3();
+  const _eyeS = new THREE.Vector3();
+  let fpvLastIdx = -1;
+  const UP = new THREE.Vector3(0, 0, 1);
+  function nameOf(pid) {
+    const n = data && data.names && data.names[String(pid)];
+    const team = bodies.get(pid) ? bodies.get(pid).team : null;
+    return (n ? n + " · " : "") + (team === "KC" ? "Kansas City" : team === "BAL" ? "Baltimore" : "team unknown");
+  }
+  function applyFpv(f) {
+    const rows = data.bodies[String(f)] || [];
+    const row = rows.find(r => r[0] === fpv);
+    const out = document.getElementById("pick");
+    if (!row) { out.textContent = `First person · id ${fpv} · ${nameOf(fpv)} · not drawn on this frame`; return false; }
+    const J = row[2];
+    const jump = fpvFwd.lengthSq() < 1e-6 || Math.abs(idx - fpvLastIdx) > 1;   // entered, scrubbed or looped: snap
+    fpvLastIdx = idx;
+    const lk = data.look && data.look[String(fpv)] && data.look[String(fpv)][String(f)];
+    const ey = data.eye && data.eye[String(fpv)] && data.eye[String(fpv)][String(f)];
+    if (lk && ey) {
+      // the exported look (render.gaze): the drawn torso's facing plus a bounded head turn toward what he watches --
+      // the passer downfield then his receiver, the defence the ball, everyone off the line the ball in flight
+      _fwd.set(lk[0], lk[1], lk[2]).normalize();
+      _eye.set(ey[0], ey[1], ey[2]);
+      if (jump) { fpvFwd.copy(_fwd); _eyeS.copy(_eye); }
+      else { fpvFwd.lerp(_fwd, 0.5).normalize(); _eyeS.lerp(_eye, 0.6); }
+      camera.position.copy(_eyeS);
+      _look.copy(_eyeS).addScaledVector(fpvFwd, 10);
+    } else {
+      gazeOf(row, f, _fwd);                                          // an export without a look: the play rule
+      if (jump) fpvFwd.copy(_fwd); else fpvFwd.lerp(_fwd, 0.25).normalize();
+      _eye.set(J[15][0], J[15][1], J[15][2]).addScaledVector(UP, 0.10).addScaledVector(fpvFwd, 0.08);
+      camera.position.copy(_eye);
+      _look.copy(_eye).addScaledVector(fpvFwd, 10).addScaledVector(UP, -1.2);   // a slight downward gaze
+    }
+    camera.up.copy(UP); camera.lookAt(_look);
+    out.textContent = `First person · id ${fpv} · ${nameOf(fpv)}`;
+    return true;
+  }
+  // The FALLBACK look, for an export without data.look: moving (> 1.5 m/s) -> along his run; a lineman (within 3 m
+  // of the line at the snap) -> the other side of the line; the ball carrier standing -> his team's attack direction;
+  // anyone else -> at the ball. Measured on play 1 (2026-09-24): it points behind every man who moves backward
+  // (backpedalling safeties, tackles in their pass sets, the quarterback's drop -- 30 % of the live body-frames),
+  // where the drawn torso is right on the film; data.look (render.gaze) starts from the torso instead.
+  const _v = new THREE.Vector3(), _bp = new THREE.Vector3();
+  const linemen = new Map();                                          // pid -> true/false, decided at the snap
+  function isLineman(pid) {
+    if (linemen.has(pid)) return linemen.get(pid);
+    const f0 = frames.find(x => x >= EVENTS.snap) ?? frames[0];
+    const r = (data.bodies[String(f0)] || []).find(q => q[0] === pid);
+    const v = r ? Math.abs(r[2][0][0] - LOS_X) < 3.0 : false;
+    linemen.set(pid, v); return v;
+  }
+  function attackDir(team) { return team === "KC" ? -1 : 1; }        // Kansas City attacks toward -x on this play (their side is x > the line)
+  function gazeOf(row, f, out) {
+    const [pid, team, J] = row;
+    const i = frames.indexOf(f);
+    const prevF = frames[Math.max(0, i - 1)], nextF = frames[Math.min(frames.length - 1, i + 1)];
+    const rp = (data.bodies[String(prevF)] || []).find(q => q[0] === pid), rn = (data.bodies[String(nextF)] || []).find(q => q[0] === pid);
+    let speed = 0;
+    if (rp && rn && nextF > prevF) {
+      _v.set(rn[2][0][0] - rp[2][0][0], rn[2][0][1] - rp[2][0][1], 0);
+      speed = _v.length() / ((nextF - prevF) / data.fps / data.stride);   // metres per second over the pelvis
+    }
+    const bp = data.ball[String(f)];
+    const carrying = bp && Math.hypot(bp[0] - J[15][0], bp[1] - J[15][1]) < 0.9;
+    if (speed > 1.5) { out.copy(_v).normalize(); return; }
+    if (isLineman(pid) || carrying || !bp) { out.set(attackDir(team), 0, 0); return; }
+    _bp.set(bp[0] - J[15][0], bp[1] - J[15][1], 0);
+    if (_bp.lengthSq() < 0.25) { out.set(attackDir(team), 0, 0); return; }
+    out.copy(_bp).normalize();
+  }
+  // First person draws the man's own body -- his hands reaching for the ball, his arms in a block -- and hides what
+  // the camera sits inside or just above: the helmet and facemask, the neck, the shoulder pads, the chest and its
+  // numbers (a chest 30 cm under the eye filled the bottom of the view).
+  function setOwnHead(b, shown) {
+    for (const o of [b.head, b.limbs[12], b.limbs[15], b.pads, b.chest, b.front, b.back]) if (o) o.visible = shown;
+  }
+  function enterFpv(pid) {
+    if (fpv !== null && fpv !== pid) { const o = bodies.get(fpv); if (o) setOwnHead(o, true); }
+    leaveRealCam(); orbit.follow = false; fpv = pid; fpvFwd.set(0, 0, 0);
+    camera.near = 0.12; camera.fov = 80; camera.updateProjectionMatrix();
+    document.querySelectorAll("[data-cam]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.cam === "fpv")));
+    showFrame(idx);
+  }
+  function leaveFpv() {
+    if (fpv === null) return;
+    const b = bodies.get(fpv); if (b) setOwnHead(b, true);
+    fpv = null; camera.near = 0.1; camera.fov = 50; camera.up.set(0, 0, 1); camera.updateProjectionMatrix();
+  }
+  function setPreset(name) {
+    if (name === "fpv") {
+      if (picked === null) { document.getElementById("pick").textContent = "click a body first, then First person"; return; }
+      enterFpv(picked); return;
+    }
+    leaveFpv();
+    document.querySelectorAll("[data-cam]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.cam === name)));
+    if (name.startsWith("real:")) {
+      realCam = name.slice(5); orbit.follow = false;
+      if (!applyRealCam(frames[idx])) { document.getElementById("pick").textContent = `no solved ${realCam} camera on this frame`; }
+      return;
+    }
+    leaveRealCam();
+    const p = PRESETS[name]; orbit.follow = !!p.follow;
+    orbit.theta = p.theta; orbit.phi = p.phi; orbit.r = p.r;
+    if (p.target) orbit.target.set(...p.target);
+    applyOrbit();
+  }
+  document.querySelectorAll("[data-cam]").forEach(b => b.addEventListener("click", () => setPreset(b.dataset.cam)));
+
+  const el = renderer.domElement;
+  let drag = null;
+  el.addEventListener("pointerdown", e => { drag = { x: e.clientX, y: e.clientY, b: e.button, shift: e.shiftKey, moved: 0 }; el.setPointerCapture(e.pointerId); });
+  el.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY; drag.moved += Math.abs(dx) + Math.abs(dy);
+    if (realCam && drag.moved > 4) { leaveRealCam(); applyOrbit(); }
+    if (fpv !== null && drag.moved > 4) { leaveFpv(); applyOrbit(); }
+    if (drag.b === 2 || drag.shift) {
+      const right = new THREE.Vector3(Math.sin(orbit.theta), -Math.cos(orbit.theta), 0);
+      const fwd = new THREE.Vector3(-Math.cos(orbit.theta), -Math.sin(orbit.theta), 0);
+      const k = orbit.r * 0.0016;
+      orbit.target.addScaledVector(right, -dx * k).addScaledVector(fwd, -dy * k); orbit.follow = false;
+    } else {
+      orbit.theta -= dx * 0.006; orbit.phi = Math.min(1.52, Math.max(0.05, orbit.phi - dy * 0.006));
+    }
+    document.querySelectorAll("[data-cam]").forEach(b => b.setAttribute("aria-pressed", "false"));
+    applyOrbit();
+  });
+  el.addEventListener("pointerup", e => {
+    if (drag && drag.moved < 4) pick(e);
+    drag = null;
+  });
+  el.addEventListener("contextmenu", e => e.preventDefault());
+  el.addEventListener("wheel", e => { e.preventDefault(); if (realCam) { leaveRealCam(); } if (fpv !== null) { leaveFpv(); } orbit.r = Math.min(160, Math.max(4, orbit.r * (1 + Math.sign(e.deltaY) * 0.08))); applyOrbit(); }, { passive: false });
+  // pinch
+  let pinch = null;
+  el.addEventListener("touchstart", e => { if (e.touches.length === 2) pinch = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); }, { passive: true });
+  el.addEventListener("touchmove", e => {
+    if (e.touches.length === 2 && pinch) {
+      const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      orbit.r = Math.min(160, Math.max(4, orbit.r * pinch / d)); pinch = d; applyOrbit();
+    }
+  }, { passive: true });
+  el.addEventListener("touchend", () => { pinch = null; }, { passive: true });
+
+  const ray = new THREE.Raycaster(); const ndc = new THREE.Vector2();
+  function pick(e) {
+    const rect = el.getBoundingClientRect();
+    ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+    const shown = (o) => { for (let q = o; q; q = q.parent) if (!q.visible) return false; return true; };
+    const meshes = [];
+    for (const b of bodies.values()) if (b.group.visible) b.group.traverse(o => { if (o.isMesh && shown(o)) meshes.push(o); });
+    const hits = ray.intersectObjects(meshes, false);
+    const out = document.getElementById("pick");
+    if (hits.length) {
+      const pid = hits[0].object.userData.pid;
+      picked = pid;
+      if (fpv !== null) { enterFpv(pid); return; }
+      out.textContent = `id ${pid} · ${nameOf(pid)} · First person to watch through his eyes`;
+    } else out.textContent = "—";
+  }
+
+  // ---- time ----
+  let data = null, frames = [], idx = 0, playing = false, speed = 1, acc = 0, last = 0;
+  const scrub = document.getElementById("scrub"), frameEl = document.getElementById("frame"), playBtn = document.getElementById("play");
+  function showFrame(i) {
+    idx = Math.max(0, Math.min(frames.length - 1, i));
+    const f = frames[idx]; scrub.value = String(idx); frameEl.textContent = String(f);
+    const rows = data.bodies[String(f)] || [];
+    const seen = new Set();
+    for (const [pid, team, J] of rows) {
+      let b = bodies.get(pid);
+      if (!b) { b = makeBody(pid, team); bodies.set(pid, b); }
+      const lk = data.look && data.look[String(pid)] && data.look[String(pid)][String(f)];
+      b.group.visible = true; poseBody(b, J, lk); seen.add(pid);
+    }
+    for (const [pid, b] of bodies) if (!seen.has(pid)) b.group.visible = false;
+    const bp = data.ball[String(f)];
+    if (bp) { ball.visible = true; ball.position.set(bp[0], bp[1], bp[2]); ball.castShadow = true; aimKey(bp[0], bp[1]); if (orbit.follow) { orbit.target.set(bp[0], bp[1], 1.0); applyOrbit(); } }
+    else ball.visible = false;
+    if (realCam) applyRealCam(f);
+    if (fpv !== null) { const b = bodies.get(fpv); if (b) setOwnHead(b, false); applyFpv(f); }
+  }
+  scrub.addEventListener("input", () => showFrame(parseInt(scrub.value, 10)));
+  function setPlaying(p) { playing = p; playBtn.textContent = p ? "Pause" : "Play"; playBtn.setAttribute("aria-pressed", String(p)); last = performance.now(); acc = 0; }
+  playBtn.addEventListener("click", () => setPlaying(!playing));
+  document.querySelectorAll("[data-speed]").forEach(b => b.addEventListener("click", () => {
+    speed = parseFloat(b.dataset.speed);
+    document.querySelectorAll("[data-speed]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  }));
+  window.addEventListener("keydown", e => {
+    if (e.target.tagName === "INPUT") return;
+    if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
+    else if (e.code === "ArrowRight") showFrame(idx + 1);
+    else if (e.code === "ArrowLeft") showFrame(idx - 1);
+    else if (e.code === "Home") showFrame(0);
+    else if (e.code === "End") showFrame(frames.length - 1);
+  });
+
+  function resize() {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+  window.addEventListener("resize", resize); resize();
+
+  function tick(now) {
+    requestAnimationFrame(tick);
+    if (playing && data) {
+      const dt = (now - last) / 1000; last = now; acc += dt * speed * data.fps;
+      while (acc >= 1) { acc -= 1; showFrame(idx + 1 >= frames.length ? 0 : idx + 1); }
+    }
+    renderer.render(scene, camera);
+  }
+  requestAnimationFrame(tick);
+
+  // ---- load ----
+  // the play's joints: the pipeline's export (play_joints.json beside this page), or ?data=<file>
+  let dataUrl = "play_joints.json";
+  try { dataUrl = new URLSearchParams(location.search).get("data") || dataUrl; } catch (e) { /* the default */ }
+  fetch(dataUrl).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }).then(d => {
+    data = d; parents = d.parents; frames = d.frames;
+    scrub.max = String(frames.length - 1);
+    const marks = document.getElementById("marks");
+    for (const [name, f] of Object.entries(EVENTS)) {
+      const i = frames.findIndex(x => x >= f); if (i < 0) continue;
+      const m = document.createElement("span"); m.className = "mark"; m.textContent = name;
+      m.style.left = `${(i / (frames.length - 1)) * 100}%`; marks.appendChild(m);
+    }
+    status.hidden = true;
+    setPreset("sideline");
+    showFrame(frames.findIndex(x => x >= EVENTS.snap - 20));
+    // deep links (a site can link a moment): ?frame=562&cam=pocket, ?cam=real:endzone, ?cam=fpv&id=80
+    let qs = null;
+    try { qs = new URLSearchParams(location.search); } catch (e) { qs = null; }
+    if (qs) {
+      const fq = parseInt(qs.get("frame") || "", 10);
+      if (Number.isFinite(fq)) { const i = frames.findIndex(x => x >= fq); if (i >= 0) showFrame(i); }
+      const cq = qs.get("cam"), iq = parseInt(qs.get("id") || "", 10);
+      if (cq === "fpv" && Number.isFinite(iq)) { picked = iq; setPreset("fpv"); }
+      else if (cq && (PRESETS[cq] || cq === "real:sideline" || cq === "real:endzone")) setPreset(cq);
+      const rq = parseFloat(qs.get("r") || ""), tq = parseFloat(qs.get("theta") || "");
+      if (!realCam && fpv === null && (Number.isFinite(rq) || Number.isFinite(tq))) {
+        if (Number.isFinite(rq)) orbit.r = Math.min(160, Math.max(2, rq));
+        if (Number.isFinite(tq)) orbit.theta = tq;
+        applyOrbit();
+      }
+    }
+  }).catch(err => { status.textContent = `Could not load the play: ${err.message}`; });
+})();
+</script>
+</body>
+</html>

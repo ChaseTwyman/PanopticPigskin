@@ -1,0 +1,17 @@
+# Line endings: authored on Windows, run on Linux too. Shell scripts are stored and checked out LF (a CRLF script
+# fails with "$'\r': command not found"), and binary assets are never converted.
+
+* text=auto
+
+*.sh      text eol=lf
+*.bash    text eol=lf
+
+# Binary assets git should never line-ending-convert or try to diff.
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.mp4     binary
+*.npz     binary
+*.ply     binary
+*.parquet binary
+*.pkl     binary

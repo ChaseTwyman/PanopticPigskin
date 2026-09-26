@@ -1,0 +1,21 @@
+{
+  "play": "Ravens at Chiefs, 2024 week 1: KC 2-20 BLT 24, Mahomes to Noah Gray, 9.7 yards",
+  "los_yards": 24,
+  "events": {
+    "fps": 59.94,
+    "snap": 395,
+    "release": 530,
+    "catch": 562,
+    "down": 607,
+    "passer": 80,
+    "receiver": 74,
+    "centre": 204
+  },
+  "clip": {
+    "start": 215,
+    "end": 607,
+    "tail": 8
+  },
+  "endzone_clip_offset": -15,
+  "note": "Frames are the sideline clip's (59.94 fps); the endzone clip runs endzone_clip_offset frames off it. snap, passer and down were read off the film by hand; release, catch and receiver were read from the ball in the sideline film (scripts/09a_ball_in_film.py). Ids are this play's global player ids."
+}

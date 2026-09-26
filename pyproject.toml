@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nfl_gsplat"
+version = "0.1.0"
+description = "PanopticPigskin: two broadcast All-22 clips of an NFL play -> calibrated cameras, tracked and named players, SMPL-X bodies fitted to both views, Gaussian-splat renders from any angle"
+requires-python = ">=3.10"
+license = {text = "AGPL-3.0-only"}
+readme = "README.md"
+dependencies = [
+    # The two environments pin different NumPy majors (SETUP.md §1; requirements/*.txt hold the exact versions).
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "rich>=13.0",
+    "opencv-python>=4.8",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+    "pillow>=10.0",
+    "imageio>=2.34",
+    "imageio-ffmpeg>=0.5",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0", "pytest-xdist>=3.5"]
+
+[tool.setuptools.packages.find]
+include = ["nfl_gsplat*"]
+exclude = ["tests*", "scripts*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: requires a CUDA-capable GPU",
+    "slow: takes more than ~10 seconds",
+    "smoke: full end-to-end pipeline on synthetic fixtures",
+    "real_video: requires real broadcast video + body models + annotations",
+]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+# SELECT EXPLICITLY. Without this line ruff applies its DEFAULT rule set, and
+# that set grows with every release -- while CI installed ruff unpinned, so the
+# lint job broke on its own with no code change behind it. By ruff 0.16 the
+# default had pulled in I, B, UP, SIM, RUF, PL, S, C4 and FURB: 309 findings
+# against the 32 reported by the rules this project actually chose. Naming the
+# set here is what stops a linter release from becoming a repo-wide diff.
+select = ["E", "F"]
+# E702 (multi-statement-on-one-line semicolon) is intentional for tight numpy
+# array initializers and test scaffolding. Keep the rest of E + F.
+ignore = ["E702"]

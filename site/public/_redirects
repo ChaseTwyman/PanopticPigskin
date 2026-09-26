@@ -1,0 +1,11 @@
+# Netlify routing for the PanopticPigskin single-page app. Rules run top to bottom, the first
+# match wins, and a rule without "!" never hides a file that exists.
+
+# Static trees: the file when it exists, otherwise a real 404. A missing clip or data file must
+# fail as a 404, never come back as the app's HTML.
+/embed/*    /index.html   404
+/media/*    /index.html   404
+/assets/*   /index.html   404
+
+# Everything else is a client-side route.
+/*          /index.html   200

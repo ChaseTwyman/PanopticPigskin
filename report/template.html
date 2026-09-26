@@ -1,0 +1,291 @@
+<title>Play 001, Graded</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper: #f5f4ee; --paper-2: #ebe9e0; --chart: #fbfaf6;
+    --ink: #1c1f1c; --ink-2: #4a4f49; --ink-3: #676c65; --rule: #d6d3c7;
+    --grid: #e1e0d9; --axis: #b9b7ad; --turf: #2f6b3a;
+    --kc: #e34948; --bal: #4a3aa7; --pos: #2a78d6; --neg: #eb6834; --zero: #898781;
+    --display: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    --body: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --mono: "JetBrains Mono", Consolas, "Courier New", monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #15181a; --paper-2: #1b1f22; --chart: #1d2124;
+      --ink: #e8e6df; --ink-2: #b8b6ad; --ink-3: #8f8e87; --rule: #30353a;
+      --grid: #2c3033; --axis: #464b4e; --turf: #7fc48c;
+      --kc: #e66767; --bal: #9085e9; --pos: #3987e5; --neg: #d95926; --zero: #898781;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #15181a; --paper-2: #1b1f22; --chart: #1d2124;
+    --ink: #e8e6df; --ink-2: #b8b6ad; --ink-3: #8f8e87; --rule: #30353a;
+    --grid: #2c3033; --axis: #464b4e; --turf: #7fc48c;
+    --kc: #e66767; --bal: #9085e9; --pos: #3987e5; --neg: #d95926; --zero: #898781;
+    color-scheme: dark;
+  }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 17px; line-height: 1.55; }
+  .col { max-width: 1120px; margin: 0 auto; padding-inline: 20px; }
+  @media (max-width: 480px) { .col { padding-inline: 16px; } }
+  header.top { padding-block: 28px 16px; border-bottom: 2px solid var(--ink); }
+  .kicker { font-family: var(--display); font-weight: 500; font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+  h1 { font-family: var(--display); font-weight: 700; font-size: clamp(34px, 6vw, 56px); line-height: 0.95; margin: 4px 0 0; text-transform: uppercase; letter-spacing: 0.01em; text-wrap: balance; }
+  .lead { font-size: 19px; color: var(--ink-2); max-width: 68ch; margin: 16px 0 20px; }
+  h2 { font-family: var(--display); font-weight: 700; font-size: 26px; text-transform: uppercase; letter-spacing: 0.02em; margin: 0 0 10px; line-height: 1; text-wrap: balance; }
+  h3 { font-family: var(--display); font-weight: 600; font-size: 18px; letter-spacing: 0.05em; text-transform: uppercase; margin: 18px 0 8px; }
+  section { padding-block: 24px; border-top: 1px solid var(--rule); }
+  p { max-width: 70ch; }
+  .board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); margin-bottom: 26px; }
+  @media (max-width: 640px) { .board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .board div { background: var(--paper-2); padding: 12px 14px; }
+  .board b { display: block; font-family: var(--display); font-weight: 600; font-size: 32px; line-height: 1; }
+  .board span { font-size: 13.5px; color: var(--ink-2); }
+  .stage { background: var(--paper-2); padding-block: 22px 18px; border-block: 1px solid var(--rule); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-family: var(--display); font-size: 14px; letter-spacing: 0.03em; color: var(--ink-2); margin: 0 0 10px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend svg { width: 26px; height: 12px; }
+  .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .field { display: block; width: 100%; min-width: 640px; height: auto; background: var(--chart); border: 1px solid var(--rule); }
+  .field .turf { fill: var(--chart); }
+  .field .yardline { stroke: var(--grid); stroke-width: 1; }
+  .field .yardlabel, .field .loslabel, .field .sidelabel { fill: var(--ink-3); font: 600 12px var(--display); letter-spacing: 0.06em; }
+  .field .los { stroke: var(--ink-2); stroke-width: 1.5; }
+  .field .path { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .field .path.kc { stroke: var(--kc); } .field .path.bal { stroke: var(--bal); }
+  .field .path.line { stroke-width: 1.5; opacity: 0.5; }
+  .field .path.target { stroke-width: 4.5; }
+  .field .ballpath { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 1 6; stroke-linecap: round; fill: none; }
+  .field .catchring { fill: none; stroke: var(--ink); stroke-width: 2; }
+  .field .downx { stroke: var(--ink); stroke-width: 2.5; stroke-linecap: round; }
+  .field .startdot { stroke: var(--chart); stroke-width: 2; }
+  .field .startdot.kc { fill: var(--kc); } .field .startdot.bal { fill: var(--bal); }
+  .field .enddot { fill: var(--chart); stroke-width: 2; }
+  .field .enddot.kc { stroke: var(--kc); } .field .enddot.bal { stroke: var(--bal); }
+  .field .plabel { fill: var(--ink); font: 600 13px var(--display); }
+  .field .player { cursor: default; outline: none; }
+  .field .player:hover .startdot, .field .player:focus .startdot { stroke: var(--ink); }
+  figcaption.cap { font-family: var(--mono); font-size: 12.5px; color: var(--ink-3); padding-top: 10px; max-width: 110ch; }
+  ol.find { list-style: none; padding: 0; margin: 0; display: grid; gap: 16px; counter-reset: s; max-width: 76ch; }
+  ol.find li { counter-increment: s; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 6px; }
+  ol.find li::before { content: counter(s); font-family: var(--display); font-weight: 700; font-size: 26px; line-height: 1.1; color: var(--turf); }
+  ol.find b { font-family: var(--display); font-weight: 600; font-size: 18px; letter-spacing: 0.04em; text-transform: uppercase; }
+  table { border-collapse: collapse; font-size: 15px; }
+  table.opts { width: 100%; min-width: 640px; }
+  table.opts th, table.data th { font-family: var(--display); font-weight: 600; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-2); text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--ink); vertical-align: bottom; }
+  table.opts td, table.data td { padding: 8px 10px; border-bottom: 1px solid var(--rule); }
+  table.opts td.num, table.data td { font-family: var(--mono); font-size: 13.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.opts tr.thrown td { background: var(--paper-2); font-weight: 600; }
+  table.opts em { font-style: normal; font-family: var(--display); font-weight: 600; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); margin-left: 6px; }
+  .dbar, .gbar { position: relative; display: inline-block; vertical-align: middle; height: 8px; }
+  .dbar { width: 120px; margin-left: 8px; }
+  .gbar { width: 56px; margin-top: 6px; display: block; }
+  .dbar::before, .gbar::before { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--axis); }
+  .dbar span, .gbar span { position: absolute; top: 0; height: 8px; border-radius: 2px; }
+  .pos { background: var(--pos); } .neg { background: var(--neg); } .zero { background: var(--zero); left: calc(50% - 1px) !important; }
+  .smgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; margin-top: 10px; }
+  .smp { margin: 0; position: relative; background: var(--chart); border: 1px solid var(--rule); padding: 8px 8px 4px; }
+  .smp figcaption { display: grid; font-size: 13px; line-height: 1.3; }
+  .smp figcaption b { font-family: var(--display); font-weight: 600; font-size: 15px; letter-spacing: 0.03em; }
+  .smp figcaption span { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+  .sm { display: block; width: 100%; height: auto; outline: none; touch-action: pan-y; }
+  .sm .grid { stroke: var(--grid); stroke-width: 1; }
+  .sm .tick { fill: var(--ink-3); font: 10px var(--mono); }
+  .sm .ref { stroke: var(--axis); stroke-width: 1.5; }
+  .sm .reflabel, .sm .smnote { fill: var(--ink-3); font: 10px var(--mono); }
+  .sm .smline { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .sm .smline.series, .sm .smdot.series { stroke: var(--kc); }
+  .sm .smline.target { stroke: var(--kc); stroke-width: 3; }
+  .sm .smline.bal { stroke: var(--bal); }
+  .sm .smdot { fill: var(--chart); stroke-width: 2; }
+  .sm .smdot.target { stroke: var(--kc); } .sm .smdot.bal { stroke: var(--bal); }
+  .sm .xhair { stroke: var(--ink-3); stroke-width: 1; }
+  .sm:focus-visible { box-shadow: 0 0 0 2px var(--turf); }
+  .smtip { position: absolute; top: 34px; right: 8px; background: var(--paper); border: 1px solid var(--rule); padding: 3px 7px; font-family: var(--mono); font-size: 12px; pointer-events: none; }
+  .smtip b { font-weight: 500; color: var(--ink); }
+  details { margin-top: 12px; }
+  summary { font-family: var(--display); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; font-size: 14px; color: var(--ink-2); cursor: pointer; }
+  .note { font-size: 15px; color: var(--ink-2); max-width: 76ch; }
+  .teams { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+  @media (max-width: 860px) { .teams { grid-template-columns: minmax(0, 1fr); } }
+  .teams h3 { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid var(--ink); padding-bottom: 6px; }
+  .teams h3 small { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0; text-transform: none; color: var(--ink-3); font-weight: 400; }
+  .cards { display: grid; gap: 12px; }
+  .pcard { background: var(--chart); border: 1px solid var(--rule); border-left: 4px solid var(--kc); padding: 10px 12px; }
+  .pcard.bal { border-left-color: var(--bal); }
+  .pcard header { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+  .pcard .jn { font-family: var(--display); font-weight: 700; font-size: 28px; line-height: 1; text-align: center; }
+  .pcard .who b { display: block; font-family: var(--display); font-weight: 600; font-size: 19px; letter-spacing: 0.02em; line-height: 1.1; }
+  .pcard .who span { font-size: 13.5px; color: var(--ink-3); }
+  .pcard .grade { text-align: right; }
+  .pcard .grade b { font-family: var(--display); font-weight: 700; font-size: 26px; line-height: 1; }
+  .pcard .lists { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 8px; }
+  @media (max-width: 520px) { .pcard .lists { grid-template-columns: minmax(0, 1fr); } }
+  .pcard h4 { margin: 0 0 4px; font-family: var(--display); font-weight: 600; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+  .pcard ul { margin: 0; padding-left: 18px; font-size: 14.5px; line-height: 1.45; }
+  .pcard li + li { margin-top: 4px; }
+  .pcard li.none { list-style: none; margin-left: -18px; color: var(--ink-3); font-style: italic; }
+  .pcard footer { margin-top: 8px; }
+  .seen { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+  .scale { display: flex; flex-wrap: wrap; gap: 6px 16px; font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); margin: 6px 0 16px; }
+  ul.cant { max-width: 76ch; padding-left: 20px; }
+  ul.cant li + li { margin-top: 8px; }
+  dl.how { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 10px 18px; max-width: 900px; margin: 0; }
+  @media (max-width: 640px) { dl.how { grid-template-columns: minmax(0, 1fr); } dl.how dd { margin-bottom: 8px; } }
+  dl.how dt { font-family: var(--display); font-weight: 600; font-size: 15px; letter-spacing: 0.05em; text-transform: uppercase; }
+  dl.how dd { margin: 0; font-size: 15.5px; color: var(--ink-2); }
+  .links { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 0; }
+  .links a { font-family: var(--display); font-weight: 600; font-size: 15px; letter-spacing: 0.06em; text-transform: uppercase; text-decoration: none; color: var(--ink); border: 1px solid var(--ink); padding: 8px 12px; border-radius: 2px; }
+  .links a:focus-visible { outline: 3px solid var(--turf); outline-offset: 2px; }
+  footer.foot { font-family: var(--mono); font-size: 12.5px; color: var(--ink-3); padding-block: 18px 40px; border-top: 1px solid var(--rule); }
+</style>
+
+<div class="col">
+  <header class="top">
+    <div class="kicker">Ravens at Chiefs · 2024 week 1 · Mahomes to Noah Gray</div>
+    <h1>Play 001, Graded</h1>
+  </header>
+  <p class="lead">Mahomes took the snap under center at the Ravens' {{spot_snap}}, dropped {{qb_top}} yards and, {{ttt}} seconds after the snap, hit Noah Gray {{air}} yards downfield between Roquan Smith and Kyle Hamilton. Gray went down {{yac}} yards later: a {{gain}}-yard gain to the Ravens' {{spot_down}}. Every number here is measured from the 3D reconstruction of the two All-22 clips, and the grades judge only what the players' positions can show.</p>
+  <div class="board" role="list">
+    <div role="listitem"><b>{{ttt}} s</b><span>snap to throw</span></div>
+    <div role="listitem"><b>{{closest}} m</b><span>closest any Raven got to Mahomes before the throw</span></div>
+    <div role="listitem"><b>{{air}} yd</b><span>in the air, line to catch point</span></div>
+    <div role="listitem"><b>{{gain}} yd</b><span>gained, {{yac}} of them after the catch</span></div>
+    <div role="listitem"><b>{{mph}} mph</b><span>average ball speed, release to catch</span></div>
+    <div role="listitem"><b>{{sep_catch}} m</b><span>from Gray to the nearest Raven at the catch</span></div>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="col">
+    <h2>The play, from above</h2>
+    <div class="legend" aria-hidden="true">
+      <span><svg viewBox="0 0 26 12"><line x1="1" y1="6" x2="25" y2="6" style="stroke:var(--kc);stroke-width:2"/></svg>Chiefs</span>
+      <span><svg viewBox="0 0 26 12"><line x1="1" y1="6" x2="25" y2="6" style="stroke:var(--bal);stroke-width:2"/></svg>Ravens</span>
+      <span><svg viewBox="0 0 26 12"><line x1="1" y1="6" x2="25" y2="6" style="stroke:var(--kc);stroke-width:4.5"/></svg>Gray's route</span>
+      <span><svg viewBox="0 0 26 12"><line x1="2" y1="6" x2="24" y2="6" style="stroke:var(--ink);stroke-width:2;stroke-dasharray:1 5;stroke-linecap:round"/></svg>The ball</span>
+      <span><svg viewBox="0 0 26 12"><circle cx="7" cy="6" r="4" style="fill:var(--ink-2)"/><circle cx="19" cy="6" r="3" style="fill:none;stroke:var(--ink-2);stroke-width:2"/></svg>Snap spot, path end</span>
+      <span><svg viewBox="0 0 26 12"><circle cx="13" cy="6" r="5" style="fill:none;stroke:var(--ink);stroke-width:2"/></svg>Catch</span>
+      <span><svg viewBox="0 0 26 12"><path d="M8,1 L18,11 M8,11 L18,1" style="stroke:var(--ink);stroke-width:2.5"/></svg>Down</span>
+    </div>
+    <figure style="margin:0">
+      <div class="scroll" id="fieldScroll">%%FIELD_SVG%%</div>
+      <figcaption class="cap">Top-down, Chiefs attacking left, the near sideline at the bottom (the broadcast view). Receivers are drawn to the catch, linemen and rushers to the throw, and Gray, Smith and Hamilton to the down. Hover or focus a player for his role and grade. "A" and "B" are the two Chiefs receivers whose numbers were never read on the film; "CB" is the Ravens' right cornerback, likewise unread.</figcaption>
+    </figure>
+  </div>
+</div>
+
+<div class="col">
+  <section>
+    <h2>What the tracking shows</h2>
+    <ol class="find">
+      <li><div><b>Won up front.</b> Four rushers against five linemen and a back who likely chipped. Humphrey and Thuney double-teamed Travis Jones for the whole dropback, and the closest any Raven got to Mahomes was {{closest}} m (Madubuike, at {{closest_s}} s). The ball was out at {{ttt}} s.</div></li>
+      <li><div><b>Two deep, and Gray sat under them.</b> Both safeties bailed to about {{s_deep}} yards by the throw, with Hamilton and Roquan Smith at {{d_ham}} and {{d_smith}}. Gray settled at {{d_gray}} yards in the gap between those two, {{sep_rel}} m from Smith.</div></li>
+      <li><div><b>The throw took the yards, not the safest window.</b> At the release Kelce ({{m_kel}} s) and Pacheco ({{m_pac}} s) were open but short, and Gray was tight ({{m_gray}} s) at 8-plus yards. The two deeper routes were covered: Receiver B's vertical was capped by Eddie Jackson over the top ({{m_b}} s), and Receiver A by the right cornerback ({{m_a}} s). By this measure there was no open receiver deeper than Gray to find.</div></li>
+      <li><div><b>Gray's window never quite opened; the ball beat it.</b> By the reach model Gray came closest to open at {{gb_t}} s ({{gb_m}} s, {{gb_d}} yards downfield), just after Mahomes hit the top of his drop at {{qb_top_s}} s. Mahomes climbed a yard and threw at {{ttt}} s, two yards deeper into a slightly tighter window. The ball flew {{flight}} s at an average {{vb}} m/s, about {{mph}} mph.</div></li>
+      <li><div><b>Hamilton limited the damage.</b> Gray caught it at {{gspeed}} mph with Smith {{sep_catch}} m away. Hamilton reached him {{ham_t}} s later, and Gray was down {{c2d}} s after the catch, {{yac}} yards on, at the Ravens' {{spot_down}}.</div></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>The decision</h2>
+    <p class="note">For each Chiefs receiver at the moment of the throw: where a pass to him would have been caught, how far the nearest Raven was, and the reach margin, which is how much sooner the ball gets there than any Raven can. Above zero, the receiver is open. Sorted deepest first.</p>
+    <div class="scroll">%%OPT_TABLE%%</div>
+    <h3>How open each receiver was through the dropback</h3>
+    <p class="note">The reach margin from 0.75 s after the snap to the throw at {{ttt}} s. The line ends at the moment of the throw. Hover or focus a panel for the value at any instant.</p>
+    <div class="smgrid">%%OPEN_PANELS%%</div>
+    <details><summary>Show the numbers</summary><div class="scroll">%%OPEN_TABLE%%</div></details>
+  </section>
+
+  <section>
+    <h2>The pocket</h2>
+    <p class="note">Each rusher's distance to Mahomes from the snap to the throw. The dot marks his closest approach; the line at 2 m is where this report calls it pressure. Pacheco came within {{pach_d}} m of Oweh at {{pach_t}} s before releasing, which is likely a chip.</p>
+    <div class="smgrid">%%RUSH_PANELS%%</div>
+    <details><summary>Show the numbers</summary><div class="scroll">%%RUSH_TABLE%%</div></details>
+  </section>
+
+  <section>
+    <h2>Player grades</h2>
+    <p class="note">One play, graded per player from −2 to +2 in half steps; 0 means neutral or no measurable effect on this play. Each card says what the tracking credits and faults, and how often both cameras saw the player (a position seen by both is the most trustworthy).</p>
+    <div class="scale"><span>+2 decisive</span><span>+1 clear positive</span><span>+0.5 slight positive</span><span>0 neutral</span><span>−0.5 slight negative</span><span>−1 clear negative</span><span>−2 decisive</span></div>
+    <div class="teams">
+      <div><h3>Chiefs <small>offense</small></h3><div class="cards">%%KC_CARDS%%</div></div>
+      <div><h3>Ravens <small>defense</small></h3><div class="cards">%%BAL_CARDS%%</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What this report cannot see</h2>
+    <ul class="cant">
+      <li><b>Where anyone looked.</b> The Film Room's first-person view turns each head toward the play by rule; it is not measured. So nothing here grades a read, a progression or a look-off. Measuring the helmet's facing on the endzone film is the step that would unlock it.</li>
+      <li><b>The play call and the assignments.</b> Whether Gray was the first read, and which zone each Raven owned. Coverage grades therefore judge proximity, not responsibility.</li>
+      <li><b>Technique.</b> Hands, pad level, footwork and the throwing motion. The bodies are fitted to 17 keypoints on players about 140 pixels tall, and the throw, catch and tackle poses in the renders are drawn from the play's events, not fitted.</li>
+      <li><b>Three numbers were never read on the film:</b> Receivers A and B, and the Ravens' right cornerback.</li>
+      <li><b>The pile.</b> Madubuike's position after the throw (frames 552 to 596) was read off the film by hand. Positions inside the pile are the least certain in the play, to about half a metre.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>How it is measured</h2>
+    <dl class="how">
+      <dt>Data</dt><dd>The reconstruction: every player's spot on the turf at 59.94 frames a second, from the sideline and endzone All-22 cameras, each solved on every frame. The snap, release, catch and down frames are read off the film.</dd>
+      <dt>Accuracy</dt><dd>Typically within about 0.3 m where both cameras see a player, and up to about 1 m across the field where only the sideline camera does.</dd>
+      <dt>Separation</dt><dd>Straight-line distance on the turf from a receiver to the nearest Raven.</dd>
+      <dt>Reach margin</dt><dd>For a throw at that instant, the ball flies at this throw's own average speed ({{vb}} m/s) to where the receiver will be. Each Raven runs straight at that spot at 7.0 m/s after a 0.2 s reaction, and can contest within 1 m. The margin is the first Raven's time minus the ball's time. It ranks the options against each other; it is not a completion probability. On the one throw that can be checked, it calls Gray {{m_gray}} s, and the pass was complete.</dd>
+      <dt>Pressure</dt><dd>A Raven within 2 m of the quarterback before the throw.</dd>
+      <dt>Grades</dt><dd>Per player, per play, from what the positions show. There is no play call and only one play, so there is no population to rank against. Treat them as a structured reading of the tracking, not a film grade.</dd>
+    </dl>
+    <div class="links">
+      <a href="/" target="_top">Watch the play</a>
+      <a href="/playground" target="_top">Open the Film Room</a>
+      <a href="/#how-it-works" target="_top">How it works</a>
+    </div>
+  </section>
+
+  <footer class="foot">PanopticPigskin · play 001 · measured from the reconstruction, not from the broadcast's own data</footer>
+</div>
+
+<script>
+(function () {
+  var fs = document.getElementById("fieldScroll");
+  if (fs && fs.scrollWidth > fs.clientWidth) { fs.scrollLeft = Math.max(0, fs.scrollWidth * 0.7 - fs.clientWidth / 2); }
+  document.querySelectorAll("svg.sm").forEach(function (svg) {
+    var fig = svg.closest("figure"), tip = fig.querySelector(".smtip"), line = svg.querySelector(".xhair");
+    var s = JSON.parse(svg.getAttribute("data-series"));
+    var t0 = +svg.dataset.t0, t1 = +svg.dataset.t1, y0 = +svg.dataset.y0, y1 = +svg.dataset.y1;
+    var l = +svg.dataset.l, r = +svg.dataset.r, unit = svg.dataset.unit, signed = svg.dataset.fmt === "signed";
+    var w = svg.viewBox.baseVal.width;
+    function X(t) { return l + (t - t0) / (t1 - t0) * (w - l - r); }
+    function show(i) {
+      var p = s[i], v = p[1];
+      line.setAttribute("x1", X(p[0])); line.setAttribute("x2", X(p[0])); line.style.display = "";
+      tip.textContent = "";
+      var b = document.createElement("b");
+      b.textContent = (signed && v > 0 ? "+" : "") + v.toFixed(2) + " " + unit;
+      tip.appendChild(b);
+      tip.appendChild(document.createTextNode(" at " + p[0].toFixed(2) + " s"));
+      tip.hidden = false;
+    }
+    function hide() { line.style.display = "none"; tip.hidden = true; }
+    svg.addEventListener("pointermove", function (e) {
+      var pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+      var m = svg.getScreenCTM(); if (!m) return;
+      var q = pt.matrixTransform(m.inverse());
+      var t = t0 + (q.x - l) / (w - l - r) * (t1 - t0), best = 0, bd = 1e9;
+      for (var i = 0; i < s.length; i++) { var d = Math.abs(s[i][0] - t); if (d < bd) { bd = d; best = i; } }
+      show(best);
+    });
+    svg.addEventListener("pointerleave", hide);
+    svg.addEventListener("focus", function () { show(s.length - 1); });
+    svg.addEventListener("blur", hide);
+    svg.addEventListener("keydown", function (e) {
+      var cur = +(svg.dataset.cur || (s.length - 1));
+      if (e.key === "ArrowLeft") cur = Math.max(0, cur - 1); else if (e.key === "ArrowRight") cur = Math.min(s.length - 1, cur + 1); else return;
+      svg.dataset.cur = cur; show(cur); e.preventDefault();
+    });
+  });
+})();
+</script>

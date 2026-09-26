@@ -1,0 +1,228 @@
+"""The football in the film: a small blob that moves against the camera-compensated background, outside
+every player's box, along a near-straight line in the image for the frames of its flight.
+
+WHY. The ball has always been placed from hand-typed events (08y: release, catch, receiver), and on
+2026-09-18 the receiver typed was the wrong man for a day. Nothing in the pipeline looked at the film
+for the ball. This does: the flight is the stretch of frames on which a blob moves outside the boxes,
+the passer is the box it leaves, the receiver the box it enters. It cannot see the ball inside a box
+(the hands, the pocket), so it names the ends by extrapolation into the nearest box.
+
+The pure parts live here (tested); scripts/09a_ball_in_film.py does the video work.
+"""
+from __future__ import annotations
+
+import numpy as np
+
+MIN_SPEED_PX: float = 6.0     # a ball in flight moves at least this per frame in the image (play 1: 17-19 px)
+MAX_SPEED_PX: float = 60.0
+TOL_PX: float = 14.0          # a candidate within this of the line is on the flight
+MIN_INLIERS: int = 5          # a flight needs this many frames with a blob on the line
+MIN_SPAN: int = 5             # ... spanning at least this many frames
+
+
+MIN_DENSITY: float = 0.3      # inlier frames over the flight's span: a real flight is seen on a third of its frames at least
+MAX_GAP: int = 12             # ... and never goes unseen longer than this (play 1: 10 frames behind the pocket's boxes)
+GROW_ROUNDS: int = 2          # refit a quadratic to the inliers and re-collect within tol: the arc bends off the line
+
+
+def _flight_from(inl: dict, speed: float, *, min_span: int) -> dict | None:
+    fs = np.array(sorted(inl)); xs = np.array([inl[f][1][0] for f in fs]); ys = np.array([inl[f][1][1] for f in fs])
+    if fs[-1] - fs[0] < min_span:
+        return None
+    deg = 2 if len(fs) >= 6 else 1
+    return {"frames": [int(f) for f in fs], "x": np.polyfit(fs, xs, deg), "y": np.polyfit(fs, ys, deg), "speed": float(speed), "n": int(len(fs))}
+
+
+def _grow(fl: dict, pts: list, *, tol: float, min_span: int, rounds: int = GROW_ROUNDS) -> dict:
+    """Re-collect the candidates within ``tol`` of the fitted curve and refit, ``rounds`` times: the line
+    of a RANSAC pair reaches part of a bending flight, the curve reaches the rest."""
+    for _ in range(rounds):
+        inl: dict = {}
+        for f, x, y in pts:
+            d = float(np.hypot(np.polyval(fl["x"], f) - x, np.polyval(fl["y"], f) - y))
+            if d <= tol and d < inl.get(f, (tol + 1, None))[0]:
+                inl[f] = (d, (x, y))
+        if len(inl) <= fl["n"]:
+            break
+        fs = sorted(inl)
+        sp = float(np.hypot(np.polyval(fl["x"], fs[-1]) - np.polyval(fl["x"], fs[0]), np.polyval(fl["y"], fs[-1]) - np.polyval(fl["y"], fs[0])) / max(1, fs[-1] - fs[0]))
+        grown = _flight_from(inl, sp, min_span=min_span)
+        if grown is None:
+            break
+        fl = grown
+    return fl
+
+
+def dense_enough(frames, *, min_density: float = MIN_DENSITY, max_gap: int = MAX_GAP) -> bool:
+    fs = sorted(int(f) for f in frames)
+    span = fs[-1] - fs[0] + 1
+    gaps = np.diff(fs) if len(fs) > 1 else np.array([0])
+    return len(fs) / float(span) >= min_density and int(gaps.max()) <= max_gap
+
+
+def candidate_flights(cands: dict, *, min_speed: float = MIN_SPEED_PX, max_speed: float = MAX_SPEED_PX, tol: float = TOL_PX,
+                      min_inliers: int = MIN_INLIERS, min_span: int = MIN_SPAN) -> list[dict]:
+    """Every distinct straight constant-speed image track through ``{frame: [(x, y, area), ...]}`` with
+    at least ``min_inliers`` frames holding a candidate within ``tol`` (RANSAC over candidate pairs on
+    frames ``min_span`` or more apart; tracks sharing their inlier frames collapse to the fuller one),
+    each grown along a quadratic in the frame (the arc and the perspective bend the flight off any one
+    line: play 1's flight is 23 px off the line through its ends at mid-flight) and kept only when its
+    inlier frames are dense (dense_enough: a junk line through blobs 80 frames apart is not a flight),
+    most inliers first. ``x``/``y`` are np.polyval coefficients."""
+    pts = [(int(f), float(x), float(y)) for f, cs in cands.items() for x, y, *_ in cs]
+    if len(pts) < min_inliers:
+        return []
+    found: dict = {}
+    for i, (f1, x1, y1) in enumerate(pts):
+        for f2, x2, y2 in pts[i + 1:]:
+            df = f2 - f1
+            if abs(df) < min_span:
+                continue
+            vx, vy = (x2 - x1) / df, (y2 - y1) / df
+            sp = float(np.hypot(vx, vy))
+            if not (min_speed <= sp <= max_speed):
+                continue
+            inl: dict = {}
+            for f, x, y in pts:
+                d = float(np.hypot(x1 + vx * (f - f1) - x, y1 + vy * (f - f1) - y))
+                if d <= tol and d < inl.get(f, (tol + 1, None))[0]:
+                    inl[f] = (d, (x, y))
+            if len(inl) < min_inliers:
+                continue
+            key = (min(inl), max(inl))
+            if key not in found or len(inl) > len(found[key][0]):
+                found[key] = (inl, sp)
+    out = []
+    for inl, sp in found.values():
+        fl = _flight_from(inl, sp, min_span=min_span)
+        if fl is None:
+            continue
+        fl = _grow(fl, pts, tol=tol, min_span=min_span)
+        # the grown track's own speed must still be a ball's (a cloud of slow blobs in the pocket grew into
+        # 24-inlier tracks at 3 px/frame on play 1 once a twin's boxes stopped masking them)
+        if dense_enough(fl["frames"]) and min_speed <= fl["speed"] <= max_speed:
+            out.append(fl)
+    # a track whose frames lie inside another's is that track seen shorter
+    out.sort(key=lambda fl: -fl["n"])
+    kept: list = []
+    for fl in out:
+        s = set(fl["frames"])
+        if any(s <= set(k["frames"]) for k in kept):
+            continue
+        kept.append(fl)
+    return kept
+
+
+MIN_LENGTH_PX: float = 100.0  # a pass covers at least this much image between its first and last seen frames (about 4 m
+                              # at the pocket's depth on play 1, where the real flight covers 335 px); a blob wandering
+                              # 50 px between two boxes in the pocket named the quarterback as his own receiver (v76)
+
+
+def fit_flight(cands: dict, boxes_by_frame: dict | None = None, *, min_speed: float = MIN_SPEED_PX, max_speed: float = MAX_SPEED_PX,
+               tol: float = TOL_PX, min_inliers: int = MIN_INLIERS, min_span: int = MIN_SPAN, reach: int = 20,
+               min_length: float = MIN_LENGTH_PX) -> dict | None:
+    """The ball's flight among candidate_flights at least ``min_length`` px long: with ``boxes_by_frame``
+    the track that leaves a box and enters a box (name_ends) beats one that does not -- a pass goes
+    from a hand to a hand, while a player without a box moves in the open for as long as he likes
+    (play 1: a far-field runner at 14 px/frame outscored the real flight by inliers alone) -- then the
+    LONGEST track (v76: a 50 px wander between two pocket boxes, with both ends named, outscored the
+    335 px flight on inliers), then the most inliers. None when nothing moves like a ball."""
+    fls = [fl for fl in candidate_flights(cands, min_speed=min_speed, max_speed=max_speed, tol=tol, min_inliers=min_inliers, min_span=min_span)
+           if track_length(fl) >= min_length]
+    if not fls:
+        return None
+    if boxes_by_frame is None:
+        return max(fls, key=lambda fl: (fl["n"], track_length(fl)))
+
+    def score(fl):
+        e = name_ends(fl, boxes_by_frame, reach=reach)
+        return ((e["passer"] is not None) + (e["receiver"] is not None), track_length(fl), fl["n"])
+    return max(fls, key=score)
+
+
+def track_length(flight: dict) -> float:
+    """The image distance the fitted track covers between its first and last seen frames, px."""
+    x0, y0 = track_at(flight, flight["frames"][0]); x1, y1 = track_at(flight, flight["frames"][-1])
+    return float(np.hypot(x1 - x0, y1 - y0))
+
+
+def track_at(flight: dict, f: int) -> tuple[float, float]:
+    return float(np.polyval(flight["x"], f)), float(np.polyval(flight["y"], f))
+
+
+def boxes_holding(boxes, x: float, y: float, *, pad: float = 0.0) -> list:
+    """The ids of the boxes (``[(pid, x1, y1, x2, y2), ...]``) containing (x, y) grown by ``pad``,
+    smallest box first."""
+    hits = [(float((x2 - x1) * (y2 - y1)), pid) for pid, x1, y1, x2, y2 in boxes
+            if x1 - pad <= x <= x2 + pad and y1 - pad <= y <= y2 + pad]
+    return [pid for _a, pid in sorted(hits)]
+
+
+def box_holding(boxes, x: float, y: float, *, pad: float = 0.0, teams: dict | None = None, prefer=None):
+    """The id of the box containing (x, y): of ``prefer``'s team when ``teams`` names one among the
+    hits (a completed pass ends in the offence's hands; in tight coverage the defender's box holds the
+    same point -- play 1: BAL 55 draped on the receiver), else the smallest; None when none."""
+    hits = boxes_holding(boxes, x, y, pad=pad)
+    if not hits:
+        return None
+    if teams is not None and prefer is not None:
+        own = [pid for pid in hits if teams.get(pid) == prefer]
+        if own:
+            return own[0]
+    return hits[0]
+
+
+def _walk(flight, boxes_by_frame, frames, *, pad, teams, prefer):
+    """The first frame along ``frames`` where a box holds the track point -- an offence box when
+    ``prefer`` names the offence and one holds it within the walk, else the first box of any team."""
+    first_any = None
+    for f in frames:
+        x, y = track_at(flight, f)
+        hits = boxes_holding(boxes_by_frame.get(f, []), x, y, pad=pad)
+        if not hits:
+            continue
+        if first_any is None:
+            first_any = (f, hits[0])
+        if prefer is not None and teams is not None:
+            own = [pid for pid in hits if teams.get(pid) == prefer]
+            if own:
+                return f, own[0]
+        elif first_any is not None:
+            return first_any
+    return first_any
+
+
+def name_ends(flight: dict, boxes_by_frame: dict, *, reach: int = 20, pad: float = 4.0, teams: dict | None = None,
+              offence=None) -> dict:
+    """Walk the fitted track backwards from its first frame until it lies inside a box (the passer's
+    hand: the release frame and id) and forwards from its last until it does again (the receiver's
+    hands: the catch frame and id); ``reach`` frames each way at most. ``boxes_by_frame`` is
+    ``{frame: [(pid, x1, y1, x2, y2), ...]}``. With ``teams`` ({pid: team}) and ``offence`` (the team
+    with the ball; without it the passer's team once his box is found) both ends prefer an offence box
+    within the walk: a rusher leaning into the pocket holds the release point too (play 1: BAL 198 at
+    530 named the defender 55 as the receiver through the "passer's teammate" rule), and the defender
+    draped on the receiver holds the catch point. ``others`` lists the other boxes holding the catch
+    point. Missing ends are None."""
+    f0, f1 = flight["frames"][0], flight["frames"][-1]
+    out = {"release": None, "passer": None, "catch": None, "receiver": None, "others": []}
+    got = _walk(flight, boxes_by_frame, range(f0, f0 - reach - 1, -1), pad=pad, teams=teams, prefer=offence)
+    if got is not None:
+        out["release"], out["passer"] = got
+    if offence is None and teams is not None and out["passer"] is not None:
+        offence = teams.get(out["passer"])
+    got = _walk(flight, boxes_by_frame, range(f1, f1 + reach + 1), pad=pad, teams=teams, prefer=offence)
+    if got is not None:
+        out["catch"], out["receiver"] = got
+        x, y = track_at(flight, out["catch"])
+        out["others"] = [q for q in boxes_holding(boxes_by_frame.get(out["catch"], []), x, y, pad=pad) if q != out["receiver"]]
+    return out
+
+
+def nearest_box(boxes, x: float, y: float):
+    """``(pid, distance)`` of the box whose centre is nearest (x, y); (None, inf) without boxes."""
+    best = (None, float("inf"))
+    for pid, x1, y1, x2, y2 in boxes:
+        d = float(np.hypot(0.5 * (x1 + x2) - x, 0.5 * (y1 + y2) - y))
+        if d < best[1]:
+            best = (pid, d)
+    return best

@@ -1,0 +1,8 @@
+{
+  "why": "Depths read off the film by hand for men neither camera places along the sideline's line of sight (see depth_snap.apply_depth_reads). Read 2026-09-26 by triangulating the helmet: sideline box top (sideline frame f) with the helmet read in the endzone film (clip frame f - 15); ray gaps 0.10-0.32 m.",
+  "depth": [
+    {"id": 4, "who": "Madubuike #92, between #65 and #74, feet hidden behind #65, never boxed by the endzone camera",
+     "y": {"552": 1.93, "564": 1.92, "584": 1.88, "596": 1.77}, "ramp": 6,
+     "endzone_helmet_px": {"552": [1130, 537], "564": [1092, 528], "584": [1052, 560], "596": [1040, 615]}}
+  ]
+}
