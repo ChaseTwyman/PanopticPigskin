@@ -91,7 +91,14 @@ def main():
     pe = json.loads((P / "play_end.json").read_text()) if (P / "play_end.json").exists() else {}
     snap = args.snap if args.snap is not None else int(pe["snap"])
     start = int(pe.get("start", 0))
-    end = int(pe["end"]) + int(pe.get("tail", 0))
+    if "end" in pe:
+        end = int(pe["end"]) + int(pe.get("tail", 0))
+    elif args.down is not None:
+        # a fresh play: the pipeline runs this before 08x, which then ends the play DEAD_AFTER_BALL (8) frames
+        # after this file's down -- the same end
+        end = int(args.down) + 8
+    else:
+        raise SystemExit("08y needs the play's end: run 08x_play_end.py first, or pass --down")
     blob = pickle.load(open(P / "identity_resolved.pkl", "rb"))
     team_of = {int(p): v.team for p, v in blob["merged"].items()}
     roles = blob.get("roles", {})
