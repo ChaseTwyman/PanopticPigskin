@@ -209,7 +209,10 @@ if ! done_ link; then
   "$PYN" scripts/08b_export_play_dir.py --recon "$P/recon.npz" --cameras "$P/cameras.npz" --root "$P" \
      --sideline sideline.mp4 --endzone endzone.mp4 --out "$P" --pairing track --pair-gap 0 \
      2>&1 | grep -v "Warning\|warn" | grep -E "kits|per-camera|linked|tracks.parquet|Error" || fail link
-  rm -f "$P/.done_pose_s" "$P/.done_pose_e" "$P/.done_identity" "$P/.done_keypoints" "$P/.done_tri" "$P/.done_refit" "$P/.done_refit_ez"
+  # New tracks invalidate the pose caches too: 05c resumes per FRAME, so a cache left from the previous link
+  # skips every frame (play 6, 2026-09-26: both pose stages "ran" in a second on the old tracks).
+  rm -f "$P/.done_pose_s" "$P/.done_pose_e" "$P/.done_identity" "$P/.done_keypoints" "$P/.done_tri" "$P/.done_refit" "$P/.done_refit_ez" \
+        "$P/poses_sideline.json" "$P/poses_endzone.json"
   mark link
 fi
 
