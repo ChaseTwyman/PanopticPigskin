@@ -50,6 +50,8 @@
 #   OFFENCE [$RED]    the team with the ball: its pre-snap formation gives unnamed ids their builds (08n)
 #   SNAP QB DOWN      the ball stage's hand-read inputs: the snap frame, the passer's id, the frame the carrier is down;
 #                     SNAP and DOWN (frames, readable before any stage runs) also bound the frames 08 samples players from
+#   RELEASE CATCH RECEIVER  the throw read off the film too (frames, the receiver's id at the catch): the ball
+#                     stage then skips 09a's search of the film for the ball
 #   FINETUNE [0]      1 = the pose fine-tune pass;  FIELD [footage]: procedural renders on a painted field
 #   ENDZONE_WEIGHT [0.3]  the endzone keypoints' weight in the two-view fit; 0 or ONE_VIEW=1: sideline only
 #   REFIT_EZ [1]      0 skips the endzone-only fits;  KICKING [0]: 1 for a kickoff, punt or field goal
@@ -402,7 +404,15 @@ fi
 # passer's id and the frame the carrier is down are read off the film by hand (SNAP, QB, DOWN). Without them the stage
 # is skipped and 08x finds the play's end from the bodies alone.
 if ! done_ ball; then
-  if [ -n "${SNAP:-}" ] && [ -n "${QB:-}" ] && [ -n "${DOWN:-}" ]; then
+  if [ -n "${SNAP:-}" ] && [ -n "${QB:-}" ] && [ -n "${DOWN:-}" ] && [ -n "${RELEASE:-}" ] && [ -n "${CATCH:-}" ] \
+     && [ -n "${RECEIVER:-}" ]; then
+    # All six read off the film: 09a is not needed. Its flight search is cubic in the moving blobs, and a camera
+    # that pans onto the crowd and the sideline (play 6) kept it busy for 35 minutes without an answer.
+    log "the ball's path (08y; snap $SNAP, passer $QB, release $RELEASE, catch $CATCH, receiver $RECEIVER, down $DOWN)"
+    "$PYS" scripts/08y_ball_path.py --play-dir "$P" --snap "$SNAP" --qb "$QB" --release "$RELEASE" --catch "$CATCH" \
+       --receiver "$RECEIVER" --down "$DOWN" 2>&1 | grep -v "Warning\|warn" | grep -E "ball|wrote|Error|Traceback" || fail ball
+    mark ball
+  elif [ -n "${SNAP:-}" ] && [ -n "${QB:-}" ] && [ -n "${DOWN:-}" ]; then
     log "the ball in the film (09a) and its path (08y; snap $SNAP, passer $QB, down $DOWN)"
     "$PYS" scripts/09a_ball_in_film.py --play-dir "$P" --start "$SNAP" --end "$DOWN" 2>&1 | grep -v "Warning\|warn" \
        | grep -E "release|catch|receiver|wrote|Error|Traceback" || fail ball
