@@ -70,6 +70,8 @@ GOAL_EDGE_CLEAR_PX: float = 8.0     # the red end zone's own white edge sits at 
 ACCEPT_LINE_PX: float = 6.0         # a frame's fit is kept only this close to its lines ...
 ACCEPT_DASH_PX: float = 6.0         # ... and its dashes ...
 ACCEPT_STEP_DEG: float = 3.0        # ... and this close to the camera it started from
+RESWEEPS: int = 3                   # frames that failed get restarts from refined neighbours ...
+RESWEEP_MAX_GAP: int = 30           # ... no further than this many frames away
 
 
 @dataclass
@@ -621,17 +623,12 @@ def refine_track(video_path, track, boxes_by_frame, *, frames=None, centre_frame
     seed_frames = sorted(seeds) or [all_frames[len(all_frames) // 2]]
     order = sorted(all_frames, key=lambda f: (min(abs(f - s) for s in seed_frames), f))
     prev_cam: dict = dict(seeds)
-    for i, f in enumerate(order):
+    kept: dict = {}                                    # frame -> its stats row
+
+    def attempt(f, K0, R0):
         im = image(f)
         if im is None:
-            continue
-        near = [g for d in range(1, 8) for g in (f - d, f + d) if g in prev_cam]
-        if f in seeds:
-            K0, R0 = seeds[f]
-        elif near:
-            K0, R0 = prev_cam[near[0]]
-        else:
-            K0, R0 = track.K[f], track.R[f]
+            return False
         t0 = -R0 @ centre
         # two registrations -- by the red end zone's edge and by the camera alone -- and the
         # one the paint agrees with wins (a mis-read boundary during the pan registered
@@ -656,16 +653,51 @@ def refine_track(video_path, track, boxes_by_frame, *, frames=None, centre_frame
             logf[f] = np.log(res.K[0, 0] / track.K[f, 0, 0])
         else:
             res = FrameFit(K0, R0, t0, res.before_px, res.before_px, res.dash_px, res.goal_px, False)
-        stats["frames"].append(f)
-        stats["before"].append(res.before_px)
-        stats["after"].append(res.after_px)
-        stats["dash"].append(res.dash_px)
-        stats["goal"].append(res.goal_px)
-        stats["n_seg"].append(len(pf.seg_k))
-        stats["n_dash"].append(len(pf.dashes))
+        kept[f] = (res.before_px, res.after_px, res.dash_px, res.goal_px, len(pf.seg_k), len(pf.dashes))
+        return bool(good)
+
+    for i, f in enumerate(order):
+        near = [g for d in range(1, 8) for g in (f - d, f + d) if g in prev_cam]
+        if f in seeds:
+            K0, R0 = seeds[f]
+        elif near:
+            K0, R0 = prev_cam[near[0]]
+        else:
+            K0, R0 = track.K[f], track.R[f]
+        attempt(f, K0, R0)
         if log_every and (i + 1) % log_every == 0:
+            rows = list(kept.values())
             _LOG.info("endzone paint: %d/%d frames, line px %.1f -> %.1f", i + 1, len(order),
-                      np.nanmedian(stats["before"]), np.nanmedian(stats["after"]))
+                      np.nanmedian([r[0] for r in rows]), np.nanmedian([r[1] for r in rows]))
+
+    # A frame the sweep above could not bring onto the paint started from a camera too far off (with a given
+    # centre and no seeds, the sweep starts at the middle frame's exported camera: 145 px off on play 6, so the
+    # chain died at once and only frames that happened to start close refined -- 104 of 427). Each gets another
+    # start from the nearest frame that did refine, outward from the refined runs, until a sweep gains nothing.
+    for _sweep in range(RESWEEPS):
+        todo = [f for f in all_frames if f in kept and f not in prev_cam]
+        if not todo or not prev_cam:
+            break
+        solved = np.asarray(sorted(prev_cam))
+        todo.sort(key=lambda f: int(np.min(np.abs(solved - f))))
+        gained = 0
+        for f in todo:
+            g = min(prev_cam, key=lambda h: abs(h - f))
+            if abs(g - f) <= RESWEEP_MAX_GAP:
+                gained += attempt(f, *prev_cam[g])
+        _LOG.info("endzone paint re-sweep %d: %d more frames on the paint (%d of %d)", _sweep + 1, gained,
+                  len(prev_cam), len(all_frames))
+        if not gained:
+            break
+    for f in sorted(kept):
+        before, after, dash, goal, n_seg, n_dash = kept[f]
+        stats["frames"].append(f)
+        stats["before"].append(before)
+        stats["after"].append(after)
+        stats["dash"].append(dash)
+        stats["goal"].append(goal)
+        stats["n_seg"].append(n_seg)
+        stats["n_dash"].append(n_dash)
     ok = np.isfinite(logf)
     if ok.sum() == 0:
         raise ValueError("no frame refined")

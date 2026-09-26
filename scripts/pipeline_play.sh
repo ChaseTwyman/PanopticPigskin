@@ -55,6 +55,8 @@
 #   REFIT_EZ [1]      0 skips the endzone-only fits;  KICKING [0]: 1 for a kickoff, punt or field goal
 #   SEED_FROM GRID_PX the paint solve (08): a solved play-dir of the same game to seed the mount; a wider grid judge
 #   MIN_RECONCILED    lower the endzone-from-players minimum (08, default 6) for one play; check the gap and heights
+#   EZ_CENTRE "x y z" hold the endzone mount (08l) where a play of the same game and half solved it, when too few
+#                     frames show the goal line with yard lines and hashes to solve it
 #   PAIR_ADDITIONS_ONLY [0], CUT_TO_FRAME  the pair and switches stages' scope;  DIAG [outputs/diag] the reports
 #   STOP_AFTER        stop once that stage is marked done, e.g. refit_mono: the ids are final there, so the passer's
 #                     id (QB) can be read off the film before the ball stage; re-run without it to continue
@@ -194,7 +196,10 @@ if ! done_ endzone_paint; then
   # At this stage there are no keypoints yet, so 08l writes on the paint alone; the players'
   # verdict (ray miss, ankle height) prints once 05o/05n run. Play 1: paint 55 -> 2.3 px,
   # ray miss 0.213 -> 0.135 m, ankles +0.33 -> +0.05 m, mount (60,0,20) -> (88,1,21).
-  "$PYN" scripts/08l_endzone_paint.py --play-dir "$P" --apply 2>&1 | grep -v "Warning\|warn" | grep -E "mount centre|players|rewritten|paint alone|Error|Traceback" || fail endzone_paint
+  # EZ_CENTRE="x y z" holds the mount where another play of the same game and half solved it: play 6 (LOS 30 yd
+  # out) shows the goal line with the yard lines and hashes on 2 frames, too few to solve the centre.
+  "$PYN" scripts/08l_endzone_paint.py --play-dir "$P" ${EZ_CENTRE:+--centre $EZ_CENTRE} --apply 2>&1 | grep -v "Warning\|warn" \
+     | grep -E "mount centre|re-sweep|players|rewritten|paint alone|Error|Traceback" || fail endzone_paint
   mark endzone_paint
 fi
 
