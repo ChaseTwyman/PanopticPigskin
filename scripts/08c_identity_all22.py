@@ -29,7 +29,7 @@ import pandas as pd
 
 from nfl_gsplat.errors import SetupError
 
-from nfl_gsplat.identity.merge_cameras import PlayerIdentity
+from nfl_gsplat.identity.merge_cameras import PlayerIdentity, is_named
 
 
 def crop_provider(videos):
@@ -293,11 +293,11 @@ def main() -> None:
     if overruled:
         print(f"   kit overruled the number on {len(overruled)} ids: "
               + ", ".join(f"id {g} #{j} is {o}-only, kit {t}" for g, j, o, t in overruled)[:400])
-    n_named = sum(1 for p in merged.values() if not p.player.startswith("P"))
+    n_named = sum(1 for p in merged.values() if is_named(p.player))
     print(f"identity_resolved.pkl: {len(merged)} players, {n_named} named from the roster")
     if n_named:
         seen = sorted({(p.team, p.jersey, p.player) for p in merged.values()
-                       if not p.player.startswith("P")})
+                       if is_named(p.player)})
         print("   " + ", ".join(f"{t} #{j} {n}" for t, j, n in seen)[:600])
     print(f"unnamed ids fall back to generic bodies: "
           f"{np.round(100 * (1 - n_named / max(len(merged), 1))):.0f}%")

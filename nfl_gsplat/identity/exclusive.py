@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from nfl_gsplat.identity.merge_cameras import is_named
+
 TIE_RATIO: float = 1.5
 
 
@@ -30,7 +32,7 @@ def exclusive_names(merged: dict, spans: dict, evidence: dict, *, tie_ratio: flo
     of (id, jersey, player, kept id or None)."""
     by_claim: dict = {}
     for gid, ident in merged.items():
-        if ident.jersey > 0 and not str(ident.player).startswith("P"):
+        if ident.jersey > 0 and is_named(ident.player):
             by_claim.setdefault((ident.team, int(ident.jersey)), []).append(int(gid))
     out = dict(merged)
     demoted = []
@@ -52,7 +54,7 @@ def exclusive_names(merged: dict, spans: dict, evidence: dict, *, tie_ratio: flo
             if ev_k > 0 and ev_g > 0 and ev_k / ev_g < tie_ratio:
                 # a tie: neither claim is sound
                 for x in (g, k):
-                    if x in out and not str(out[x].player).startswith("P"):
+                    if x in out and is_named(out[x].player):
                         out[x] = replace(out[x], jersey=0, player=f"P{x}")
                         demoted.append((x, claim[1], merged[x].player, None))
                 if k in kept:

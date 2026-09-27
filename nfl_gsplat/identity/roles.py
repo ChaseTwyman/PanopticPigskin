@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from nfl_gsplat.identity.merge_cameras import is_named
+
 STATIC_MPS: float = 0.5
 MOVING_FRAC: float = 0.4          # the snap: fewer than this fraction of bodies still static ...
 SNAP_HOLD: int = 12               # ... for this many frames
@@ -281,7 +283,7 @@ def apply_role_builds(merged: dict, roles: dict, builds: dict | None = None) -> 
     for pid, role in roles.items():
         key = pid if pid in merged else str(pid)
         p = merged.get(key)
-        if p is None or not str(getattr(p, "player", "")).startswith("P"):
+        if p is None or is_named(getattr(p, "player", "")):
             continue
         h, kg = builds.get(role, POSITION_BUILDS["DB"])
         h, lb = float(h), float(kg) / 0.4536

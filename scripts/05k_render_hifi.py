@@ -30,6 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
+from nfl_gsplat.identity.merge_cameras import is_named
 from nfl_gsplat.utils.logging import get_logger
 
 _LOG = get_logger(__name__)
@@ -309,7 +310,7 @@ def main() -> None:
         # number) no other id of the play claims (the OCR names several ids
         # after one player; those stay blank rather than wrong).
         named = {int(pid): p for pid, p in merged.items()
-                 if getattr(p, "player", None) and not str(p.player).startswith("P")
+                 if is_named(getattr(p, "player", None))
                  and getattr(p, "team", None) in un.KITS
                  and team_of.get(int(pid), getattr(p, "team", None)) == getattr(p, "team", None)}
         claims = collections.Counter((p.team, p.jersey) for p in named.values())
@@ -524,7 +525,7 @@ def main() -> None:
                "teams": {str(k): v for k, v in export_ids.items()},
                "names": {str(k): (f"{int(getattr(merged[k], 'jersey', 0))} {merged[k].player}".strip()
                                    if int(getattr(merged[k], 'jersey', 0) or 0) > 0 else str(merged[k].player))
-                         for k in export_ids if k in merged and not str(getattr(merged[k], 'player', '')).startswith('P')},
+                         for k in export_ids if k in merged and is_named(getattr(merged[k], 'player', ''))},
                "los": los, "bodies": {str(k): v for k, v in export.items()}, "ball": {str(k): v for k, v in ball_out.items()}}
         # the first-person look (render.gaze): the drawn torso's facing plus a bounded head turn toward what the man
         # watches (the passer downfield then his receiver, the defence the ball, everyone off the line the ball in

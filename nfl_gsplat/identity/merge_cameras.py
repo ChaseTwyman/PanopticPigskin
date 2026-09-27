@@ -37,6 +37,14 @@ from nfl_gsplat.utils.logging import get_logger
 _LOG = get_logger(__name__)
 
 
+def is_named(player) -> bool:
+    """True for a roster name; False for the generic ``P<id>`` an unnamed id carries, and for none. The test was
+    ``startswith("P")``, which also threw away every real name starting with P: Patrick Mahomes lost the number on
+    his jersey and his label in the Film Room on both demo plays, and the one-name-one-avatar rule never saw him."""
+    s = str(player or "")
+    return bool(s) and not (s[0] == "P" and s[1:].isdigit())
+
+
 @dataclass(frozen=True)
 class PlayerIdentity:
     """One player, as seen by however many cameras identified them."""

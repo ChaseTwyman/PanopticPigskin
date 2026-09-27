@@ -53,3 +53,10 @@ def test_dry_run_writes_nothing_and_unname_clears_the_name(tmp_path):
     r = _run("--play-dir", str(P), "--id", "17", "--team", "BAL", "--unname", "--rosters", str(rosters), "--apply")
     ident = pickle.load(open(P / "identity_resolved.pkl", "rb"))["merged"][17]
     assert (ident.team, ident.jersey, ident.player, ident.weight_lb) == ("BAL", 0, "P17", 0.0)
+
+
+def test_is_named_keeps_real_names_that_start_with_p():
+    from nfl_gsplat.identity.merge_cameras import is_named
+
+    assert is_named("Patrick Mahomes") and is_named("Isiah Pacheco")
+    assert not is_named("P17") and not is_named("P0") and not is_named("") and not is_named(None)

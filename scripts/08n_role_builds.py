@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from nfl_gsplat.calibration.cameras_io import load_camera_track
+from nfl_gsplat.identity.merge_cameras import is_named
 from nfl_gsplat.identity.roles import (POSITION_BUILDS, apply_role_builds, assign_roles, formation_frame,
                                        inherit_roles, line_of_scrimmage, position_builds, presnap_summary,
                                        roles_from_roster, snap_frame, track_ends, WINDOW_BEFORE, WINDOW_MARGIN)
@@ -70,7 +71,7 @@ def main() -> None:
         p = merged.get(pid) or merged.get(str(pid))
         name = getattr(p, "player", "?")
         h, kg = builds.get(roles[pid], POSITION_BUILDS["DB"])
-        tag = f"{h:.2f} m {kg:.0f} kg" if str(name).startswith("P") else f"named ({getattr(p, 'height_m', 0):.2f} m)"
+        tag = f"{h:.2f} m {kg:.0f} kg" if not is_named(name) else f"named ({getattr(p, 'height_m', 0):.2f} m)"
         print(f"  {pid:3d} {teams[pid]:3s} {roles[pid]:3s} {(x - los) * sign:+5.1f} {y - yc:+5.1f}  {a:5.2f}   {name} -> {tag}")
     # every roled track passes its role to the track that continues it
     spans, ends = track_ends(ground, set(teams))

@@ -30,6 +30,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from nfl_gsplat.identity.merge_cameras import is_named
+
 HANDOVER_FRAMES = 25     # a successor starts at most this many frames after the run ends (and at most 5 before)
 HANDOVER_M = 3.0         # ... and this close to where it ended
 TWIN_M = 0.8             # two same-team bodies this close are one man until the film says otherwise
@@ -70,7 +72,7 @@ def main() -> None:
         if m is None:
             return f"{pid}(?)"
         num = f" #{m.jersey}" if m.jersey else ""
-        who = "" if m.player.startswith("P") and m.player[1:].isdigit() else f" {m.player}"
+        who = f" {m.player}" if is_named(m.player) else ""
         return f"{pid}({m.team}{num}{who})"
 
     tracks_of = {pid: sorted({f"{c[0]}{t}" for c, t in zip(g["cam"], g["track_id"])})

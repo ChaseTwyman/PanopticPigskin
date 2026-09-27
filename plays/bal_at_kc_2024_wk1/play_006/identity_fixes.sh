@@ -51,3 +51,10 @@ PY="${PY_SMPLX:-python}"
 # sideline track on him to 420.   census live 1.94 -> 1.87 (330-413 1.50 -> 1.31, 414-479 3.48 -> 3.33);
 # steps over 0.25 m 26 -> 10 (94's hops were the triple).
 "$PY" scripts/08zc_relabel_tracks.py --play-dir "$P" --plan plays/bal_at_kc_2024_wk1/play_006/plan_van_noy.json --apply
+
+# --- batch 7: names. The passer's name is shared by three fragment ids (146, 165, 207), so the loader's one-name-one-
+# avatar rule dropped it from all four and Mahomes was drawn without his number; #55 Swayze Bozeman (a KC linebacker,
+# not on the field on offence) is an OCR misread on three offence fragments. Labels only: census and steps unchanged.
+for id in 146 165 207 91 164 182; do
+  "$PY" scripts/08zb_set_identity.py --play-dir "$P" --id $id --team KC --unname --apply
+done
